@@ -24,6 +24,7 @@ import {
 } from "@/lib/demo/store";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { entryDateKey, monthDateRange } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import {
   canAdminBranch,
@@ -223,25 +224,29 @@ export async function getMonthStatus(branchId: string, month: string) {
   if (isDemoMode()) return demoMonthStatus(branchId, month);
 
   const supabase = await createClient();
-  const start = `${month}-01`;
-  const end = `${month}-31`;
-  const [{ data: sales }, { data: expenses }] = await Promise.all([
-    supabase
-      .from("sales_entries")
-      .select("entry_date")
-      .eq("branch_id", branchId)
-      .gte("entry_date", start)
-      .lte("entry_date", end),
-    supabase
-      .from("expense_entries")
-      .select("entry_date")
-      .eq("branch_id", branchId)
-      .gte("entry_date", start)
-      .lte("entry_date", end),
-  ]);
+  const { start, endExclusive } = monthDateRange(month);
+  const [{ data: sales, error: salesError }, { data: expenses, error: expensesError }] =
+    await Promise.all([
+      supabase
+        .from("sales_entries")
+        .select("entry_date")
+        .eq("branch_id", branchId)
+        .gte("entry_date", start)
+        .lt("entry_date", endExclusive),
+      supabase
+        .from("expense_entries")
+        .select("entry_date")
+        .eq("branch_id", branchId)
+        .gte("entry_date", start)
+        .lt("entry_date", endExclusive),
+    ]);
+  if (salesError) throw new Error(salesError.message);
+  if (expensesError) throw new Error(expensesError.message);
 
-  const salesDates = new Set((sales ?? []).map((row) => row.entry_date));
-  const expenseDates = new Set((expenses ?? []).map((row) => row.entry_date));
+  const salesDates = new Set((sales ?? []).map((row) => entryDateKey(row.entry_date)));
+  const expenseDates = new Set(
+    (expenses ?? []).map((row) => entryDateKey(row.entry_date)),
+  );
   return [...new Set([...salesDates, ...expenseDates])].sort().map((date) => ({
     date,
     hasSales: salesDates.has(date),
@@ -407,32 +412,34 @@ export async function getMonthReport(branchId: string, month: string) {
 
   const status = await getMonthStatus(branchId, month);
   const supabase = await createClient();
-  const start = `${month}-01`;
-  const end = `${month}-31`;
-  const [{ data: sales }, { data: expenses }] = await Promise.all([
-    supabase
-      .from("sales_entries")
-      .select("entry_date, quantity, unit_price_snapshot")
-      .eq("branch_id", branchId)
-      .gte("entry_date", start)
-      .lte("entry_date", end),
-    supabase
-      .from("expense_entries")
-      .select("entry_date, amount")
-      .eq("branch_id", branchId)
-      .gte("entry_date", start)
-      .lte("entry_date", end),
-  ]);
+  const { start, endExclusive } = monthDateRange(month);
+  const [{ data: sales, error: salesError }, { data: expenses, error: expensesError }] =
+    await Promise.all([
+      supabase
+        .from("sales_entries")
+        .select("entry_date, quantity, unit_price_snapshot")
+        .eq("branch_id", branchId)
+        .gte("entry_date", start)
+        .lt("entry_date", endExclusive),
+      supabase
+        .from("expense_entries")
+        .select("entry_date, amount")
+        .eq("branch_id", branchId)
+        .gte("entry_date", start)
+        .lt("entry_date", endExclusive),
+    ]);
+  if (salesError) throw new Error(salesError.message);
+  if (expensesError) throw new Error(expensesError.message);
 
   const days = status.map((day) => {
     const salesTotal = (sales ?? [])
-      .filter((row) => row.entry_date === day.date)
+      .filter((row) => entryDateKey(row.entry_date) === day.date)
       .reduce(
         (sum, row) => sum + toNumber(row.quantity) * toNumber(row.unit_price_snapshot),
         0,
       );
     const expenseTotal = (expenses ?? [])
-      .filter((row) => row.entry_date === day.date)
+      .filter((row) => entryDateKey(row.entry_date) === day.date)
       .reduce((sum, row) => sum + toNumber(row.amount), 0);
     return {
       date: day.date,

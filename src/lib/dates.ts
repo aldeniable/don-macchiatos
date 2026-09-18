@@ -57,6 +57,19 @@ export function parseMonthKey(value: string) {
   return { year, month };
 }
 
+export function monthDateRange(month: string) {
+  const { year, month: monthNumber } = parseMonthKey(month);
+  const next = shiftMonth(year, monthNumber, 1);
+  return {
+    start: `${month}-01`,
+    endExclusive: `${monthKey(next.year, next.month)}-01`,
+  };
+}
+
+export function entryDateKey(value: string) {
+  return value.slice(0, 10);
+}
+
 export function formatLongDate(date: string) {
   return parseISO(date).toLocaleDateString("en-PH", {
     weekday: "short",
