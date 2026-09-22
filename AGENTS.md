@@ -10,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Don Macchiatos Ops
 
-Internal phone-first ops app for Don Macchiatos, Don Lemon, and Yogurt.
+Internal phone-first ops app for Don Macchiatos, Don Lemon, and Shawarma.
 
 - Next.js 16 App Router lives under `src/app`. Auth refresh belongs in `src/proxy.ts`, not `middleware.ts`.
 - Demo mode (`NEXT_PUBLIC_DEMO_MODE=true`) uses `src/lib/demo/store.ts`. Live mode uses Supabase + RLS in `supabase/migrations`.

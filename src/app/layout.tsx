@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Don Macchiatos Ops",
-  description: "Daily sales and expense tracker for Don Macchiatos, Don Lemon, and Yogurt.",
+  description: "Daily sales and expense tracker for Don Macchiatos, Don Lemon, and Shawarma.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
