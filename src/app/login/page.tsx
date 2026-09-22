@@ -7,7 +7,7 @@ export default function LoginPage() {
         <p className="text-sm font-medium text-primary">Branch ops</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Don Macchiatos</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Record daily sales and expenses for Don Mac, Don Lemon, and Yogurt.
+          Record daily sales and expenses for Don Mac, Don Lemon, and Shawarma.
         </p>
       </div>
       <LoginForm />
