@@ -6,6 +6,7 @@ import {
   demoCreateStaff,
   demoDayExpenses,
   demoDaySales,
+  demoDayStocks,
   demoExpenseCategories,
   demoGetBranch,
   demoGetUser,
@@ -17,10 +18,13 @@ import {
   demoProducts,
   demoSaveExpenses,
   demoSaveSales,
+  demoSaveStocks,
   demoSetPrice,
   demoSignIn,
+  demoStockItems,
   demoUpsertExpenseCategory,
   demoUpsertProduct,
+  demoUpsertStockItem,
 } from "@/lib/demo/store";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -31,10 +35,14 @@ import {
   canEnterBranch,
   canManageCatalog,
   canManageStaff,
+  canSeeSuperadminExpenses,
   type Branch,
   type DayEntry,
+  type ExpenseCategory,
   type Role,
   type SessionUser,
+  type StockItem,
+  type StockLine,
 } from "@/lib/types";
 
 export async function getSession(): Promise<SessionUser | null> {
@@ -199,13 +207,44 @@ export async function getProductsForBranch(branchId: string) {
   }));
 }
 
-export async function getExpenseCategories(branchId: string) {
+async function listExpenseCategories(branchId: string): Promise<ExpenseCategory[]> {
   const branch = await getBranch(branchId);
   if (isDemoMode()) return demoExpenseCategories(branch.businessId);
 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("expense_categories")
+    .select("id, business_id, name, is_active, sort_order, is_superadmin_only")
+    .eq("business_id", branch.businessId)
+    .order("sort_order");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    businessId: row.business_id,
+    name: row.name,
+    isActive: row.is_active,
+    sortOrder: row.sort_order,
+    isSuperadminOnly: row.is_superadmin_only,
+  }));
+}
+
+// The only expense types this user may see or record against. Everything that
+// reads or writes a category goes through here, so a superadmin-only type can
+// never reach an admin's page or an admin's save.
+export async function getExpenseCategories(branchId: string) {
+  const user = await requireSession();
+  const categories = await listExpenseCategories(branchId);
+  if (canSeeSuperadminExpenses(user)) return categories;
+  return categories.filter((category) => !category.isSuperadminOnly);
+}
+
+export async function getStockItems(branchId: string): Promise<StockItem[]> {
+  const branch = await getBranch(branchId);
+  if (isDemoMode()) return demoStockItems(branch.businessId);
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("stock_items")
     .select("id, business_id, name, is_active, sort_order")
     .eq("business_id", branch.businessId)
     .order("sort_order");
@@ -217,6 +256,43 @@ export async function getExpenseCategories(branchId: string) {
     isActive: row.is_active,
     sortOrder: row.sort_order,
   }));
+}
+
+export async function getDayStocks(
+  branchId: string,
+  date: string,
+): Promise<StockLine[]> {
+  await getBranch(branchId);
+  const rows = isDemoMode()
+    ? await demoDayStocks(branchId, date)
+    : await (async () => {
+        const supabase = await createClient();
+        const { data, error } = await supabase.rpc("stock_day_state", {
+          p_branch_id: branchId,
+          p_entry_date: date,
+        });
+        if (error) throw new Error(error.message);
+        return (data ?? []).map((row) => ({
+          stockItemId: row.stock_item_id,
+          name: row.item_name,
+          isActive: row.is_active,
+          opening: toNumber(row.opening_quantity),
+          added: toNumber(row.added_quantity),
+          used: toNumber(row.used_quantity),
+        }));
+      })();
+
+  return rows
+    .filter(
+      (row) => row.isActive || row.opening !== 0 || row.added > 0 || row.used > 0,
+    )
+    .map((row) => ({
+      stockItemId: row.stockItemId,
+      name: row.name,
+      opening: row.opening,
+      added: row.added,
+      used: row.used,
+    }));
 }
 
 export async function getMonthStatus(branchId: string, month: string) {
@@ -255,9 +331,10 @@ export async function getMonthStatus(branchId: string, month: string) {
 }
 
 export async function getDayEntry(branchId: string, date: string): Promise<DayEntry> {
-  const [products, categories] = await Promise.all([
+  const [products, categories, stocks] = await Promise.all([
     getProductsForBranch(branchId),
     getExpenseCategories(branchId),
+    getDayStocks(branchId, date),
   ]);
 
   const salesRows = isDemoMode()
@@ -303,6 +380,8 @@ export async function getDayEntry(branchId: string, date: string): Promise<DayEn
     ]),
   );
 
+  const visibleCategoryIds = new Set(categories.map((category) => category.id));
+
   return {
     date,
     sales: products
@@ -325,7 +404,12 @@ export async function getDayEntry(branchId: string, date: string): Promise<DayEn
         name: category.name,
         amount:
           expenseRows.find((row) => row.categoryId === category.id)?.amount ?? 0,
+        isSuperadminOnly: category.isSuperadminOnly,
       })),
+    stocks,
+    hiddenExpenseTotal: expenseRows
+      .filter((row) => !visibleCategoryIds.has(row.categoryId))
+      .reduce((sum, row) => sum + row.amount, 0),
   };
 }
 
@@ -379,19 +463,30 @@ export async function saveDayExpenses(
   const user = await requireSession();
   await getBranch(branchId);
 
+  // A save rewrites the day, so it has to leave expense types this user cannot
+  // see untouched: an admin saving expenses must not wipe a stock refill.
+  const editableIds = (await getExpenseCategories(branchId)).map(
+    (category) => category.id,
+  );
+  const editable = new Set(editableIds);
+  const accepted = lines.filter((line) => editable.has(line.categoryId));
+
   if (isDemoMode()) {
-    await demoSaveExpenses(branchId, date, lines);
+    await demoSaveExpenses(branchId, date, accepted, editableIds);
     return;
   }
 
   const supabase = await createClient();
-  await supabase
-    .from("expense_entries")
-    .delete()
-    .eq("branch_id", branchId)
-    .eq("entry_date", date);
+  if (editableIds.length) {
+    await supabase
+      .from("expense_entries")
+      .delete()
+      .eq("branch_id", branchId)
+      .eq("entry_date", date)
+      .in("category_id", editableIds);
+  }
 
-  const rows = lines
+  const rows = accepted
     .filter((line) => line.amount > 0)
     .map((line) => ({
       branch_id: branchId,
@@ -406,11 +501,57 @@ export async function saveDayExpenses(
   }
 }
 
+export async function saveDayStocks(
+  branchId: string,
+  date: string,
+  lines: { stockItemId: string; added: number; used: number }[],
+) {
+  const user = await requireSession();
+  await getBranch(branchId);
+
+  if (isDemoMode()) {
+    await demoSaveStocks(branchId, date, lines);
+    return;
+  }
+
+  const supabase = await createClient();
+  await supabase
+    .from("stock_entries")
+    .delete()
+    .eq("branch_id", branchId)
+    .eq("entry_date", date);
+
+  const rows = lines
+    .filter((line) => line.added > 0 || line.used > 0)
+    .map((line) => ({
+      branch_id: branchId,
+      stock_item_id: line.stockItemId,
+      entry_date: date,
+      added_quantity: line.added,
+      used_quantity: line.used,
+      recorded_by: user.id,
+    }));
+  if (rows.length) {
+    const { error } = await supabase.from("stock_entries").insert(rows);
+    if (error) throw new Error(error.message);
+  }
+}
+
 export async function getMonthReport(branchId: string, month: string) {
-  await requireAdminBranch(branchId);
-  if (isDemoMode()) return demoMonthReport(branchId, month);
+  const { user } = await requireAdminBranch(branchId);
+  // Expense totals always include refills; only a superadmin is told how much
+  // of the total they are, so the numbers are never sent to anyone else.
+  const showRefill = canSeeSuperadminExpenses(user);
+  if (isDemoMode()) return demoMonthReport(branchId, month, showRefill);
 
   const status = await getMonthStatus(branchId, month);
+  const refillIds = new Set(
+    showRefill
+      ? (await listExpenseCategories(branchId))
+          .filter((category) => category.isSuperadminOnly)
+          .map((category) => category.id)
+      : [],
+  );
   const supabase = await createClient();
   const { start, endExclusive } = monthDateRange(month);
   const [{ data: sales, error: salesError }, { data: expenses, error: expensesError }] =
@@ -423,7 +564,7 @@ export async function getMonthReport(branchId: string, month: string) {
         .lt("entry_date", endExclusive),
       supabase
         .from("expense_entries")
-        .select("entry_date, amount")
+        .select("entry_date, amount, category_id")
         .eq("branch_id", branchId)
         .gte("entry_date", start)
         .lt("entry_date", endExclusive),
@@ -438,13 +579,22 @@ export async function getMonthReport(branchId: string, month: string) {
         (sum, row) => sum + toNumber(row.quantity) * toNumber(row.unit_price_snapshot),
         0,
       );
-    const expenseTotal = (expenses ?? [])
-      .filter((row) => entryDateKey(row.entry_date) === day.date)
-      .reduce((sum, row) => sum + toNumber(row.amount), 0);
+    const dayExpenses = (expenses ?? []).filter(
+      (row) => entryDateKey(row.entry_date) === day.date,
+    );
+    const expenseTotal = dayExpenses.reduce(
+      (sum, row) => sum + toNumber(row.amount),
+      0,
+    );
     return {
       date: day.date,
       salesTotal,
       expenseTotal,
+      refillTotal: showRefill
+        ? dayExpenses
+            .filter((row) => refillIds.has(row.category_id))
+            .reduce((sum, row) => sum + toNumber(row.amount), 0)
+        : null,
       net: salesTotal - expenseTotal,
       hasSales: day.hasSales,
       hasExpenses: day.hasExpenses,
@@ -452,7 +602,16 @@ export async function getMonthReport(branchId: string, month: string) {
   });
   const salesTotal = days.reduce((sum, day) => sum + day.salesTotal, 0);
   const expenseTotal = days.reduce((sum, day) => sum + day.expenseTotal, 0);
-  return { month, salesTotal, expenseTotal, net: salesTotal - expenseTotal, days };
+  return {
+    month,
+    salesTotal,
+    expenseTotal,
+    refillTotal: showRefill
+      ? days.reduce((sum, day) => sum + (day.refillTotal ?? 0), 0)
+      : null,
+    net: salesTotal - expenseTotal,
+    days,
+  };
 }
 
 export async function upsertProduct(input: {
@@ -519,11 +678,65 @@ export async function upsertExpenseCategory(input: {
   id?: string;
   name: string;
   isActive: boolean;
+  isSuperadminOnly: boolean;
+}) {
+  const { user, branch } = await requireAdminBranch(input.branchId);
+  if (!canManageCatalog(user)) redirect(`/b/${input.branchId}`);
+
+  const superadmin = canSeeSuperadminExpenses(user);
+  const isSuperadminOnly = superadmin && input.isSuperadminOnly;
+  if (
+    input.id &&
+    !(await getExpenseCategories(input.branchId)).some(
+      (category) => category.id === input.id,
+    )
+  ) {
+    throw new Error("Expense type not found.");
+  }
+
+  if (isDemoMode()) {
+    await demoUpsertExpenseCategory({
+      id: input.id,
+      businessId: branch.businessId,
+      name: input.name,
+      isActive: input.isActive,
+      isSuperadminOnly,
+    });
+    return;
+  }
+  const supabase = await createClient();
+  if (input.id) {
+    const { error } = await supabase
+      .from("expense_categories")
+      .update({
+        name: input.name,
+        is_active: input.isActive,
+        is_superadmin_only: isSuperadminOnly,
+      })
+      .eq("id", input.id)
+      .eq("business_id", branch.businessId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const { error } = await supabase.from("expense_categories").insert({
+    business_id: branch.businessId,
+    name: input.name,
+    is_active: input.isActive,
+    is_superadmin_only: isSuperadminOnly,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function upsertStockItem(input: {
+  branchId: string;
+  id?: string;
+  name: string;
+  isActive: boolean;
 }) {
   const { user, branch } = await requireAdminBranch(input.branchId);
   if (!canManageCatalog(user)) redirect(`/b/${input.branchId}`);
   if (isDemoMode()) {
-    await demoUpsertExpenseCategory({
+    await demoUpsertStockItem({
       id: input.id,
       businessId: branch.businessId,
       name: input.name,
@@ -534,14 +747,14 @@ export async function upsertExpenseCategory(input: {
   const supabase = await createClient();
   if (input.id) {
     const { error } = await supabase
-      .from("expense_categories")
+      .from("stock_items")
       .update({ name: input.name, is_active: input.isActive })
       .eq("id", input.id)
       .eq("business_id", branch.businessId);
     if (error) throw new Error(error.message);
     return;
   }
-  const { error } = await supabase.from("expense_categories").insert({
+  const { error } = await supabase.from("stock_items").insert({
     business_id: branch.businessId,
     name: input.name,
     is_active: input.isActive,

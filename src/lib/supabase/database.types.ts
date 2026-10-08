@@ -40,6 +40,7 @@ type Row = {
     name: string;
     is_active: boolean;
     sort_order: number;
+    is_superadmin_only: boolean;
     created_at: string;
   };
   sales_entries: {
@@ -58,6 +59,24 @@ type Row = {
     category_id: string;
     entry_date: string;
     amount: number;
+    recorded_by: string | null;
+    updated_at: string;
+  };
+  stock_items: {
+    id: string;
+    business_id: string;
+    name: string;
+    is_active: boolean;
+    sort_order: number;
+    created_at: string;
+  };
+  stock_entries: {
+    id: string;
+    branch_id: string;
+    stock_item_id: string;
+    entry_date: string;
+    added_quantity: number;
+    used_quantity: number;
     recorded_by: string | null;
     updated_at: string;
   };
@@ -119,6 +138,16 @@ type Relationships = {
   ];
   sales_entries: [];
   expense_entries: [];
+  stock_items: [
+    {
+      foreignKeyName: "stock_items_business_id_fkey";
+      columns: ["business_id"];
+      isOneToOne: false;
+      referencedRelation: "businesses";
+      referencedColumns: ["id"];
+    },
+  ];
+  stock_entries: [];
 };
 
 export type Database = {
@@ -136,6 +165,23 @@ export type Database = {
       current_role: { Args: Record<string, never>; Returns: UserRole };
       current_branch_id: { Args: Record<string, never>; Returns: string };
       current_business_id: { Args: Record<string, never>; Returns: string };
+      expense_category_is_superadmin_only: {
+        Args: { p_category_id: string };
+        Returns: boolean;
+      };
+      stock_day_state: {
+        Args: { p_branch_id: string; p_entry_date: string };
+        Returns: {
+          stock_item_id: string;
+          item_name: string;
+          is_active: boolean;
+          sort_order: number;
+          opening_quantity: number;
+          added_quantity: number;
+          used_quantity: number;
+          closing_quantity: number;
+        }[];
+      };
     };
     Enums: {
       user_role: UserRole;

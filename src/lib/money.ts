@@ -6,6 +6,13 @@ export function pesos(value: number) {
   }).format(value);
 }
 
+// Stock counts are whole numbers; this is only for thousands separators.
+export function formatQty(value: number) {
+  return new Intl.NumberFormat("en-PH", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 export function toNumber(value: string | number | null | undefined) {
   if (typeof value === "number") return value;
   if (!value) return 0;

@@ -11,6 +11,7 @@ import type {
   Role,
   SessionUser,
   StaffMember,
+  StockItem,
 } from "@/lib/types";
 
 export const DEMO_COOKIE = "dm_demo_user";
@@ -45,6 +46,15 @@ type DemoStore = {
     categoryId: string;
     date: string;
     amount: number;
+  }[];
+  stockItems: StockItem[];
+  stockEntries: {
+    id: string;
+    branchId: string;
+    stockItemId: string;
+    date: string;
+    added: number;
+    used: number;
   }[];
 };
 
@@ -207,22 +217,35 @@ const seed: DemoStore = {
     { branchId: "br-yogurt-main", productId: "p-straw-yo", price: 95 },
   ],
   expenseCategories: [
-    { id: "e-ice", businessId: "biz-don-mac", name: "Ice", isActive: true, sortOrder: 1 },
-    { id: "e-cups", businessId: "biz-don-mac", name: "Cups", isActive: true, sortOrder: 2 },
-    { id: "e-milk", businessId: "biz-don-mac", name: "Milk", isActive: true, sortOrder: 3 },
-    { id: "e-rent", businessId: "biz-don-mac", name: "Rent", isActive: true, sortOrder: 4 },
-    { id: "e-util", businessId: "biz-don-mac", name: "Utilities", isActive: true, sortOrder: 5 },
-    { id: "e-other", businessId: "biz-don-mac", name: "Others", isActive: true, sortOrder: 6 },
-    { id: "el-ice", businessId: "biz-don-lemon", name: "Ice", isActive: true, sortOrder: 1 },
-    { id: "el-cups", businessId: "biz-don-lemon", name: "Cups", isActive: true, sortOrder: 2 },
-    { id: "el-lemons", businessId: "biz-don-lemon", name: "Lemons", isActive: true, sortOrder: 3 },
-    { id: "el-rent", businessId: "biz-don-lemon", name: "Rent", isActive: true, sortOrder: 4 },
-    { id: "ey-cups", businessId: "biz-yogurt", name: "Cups", isActive: true, sortOrder: 1 },
-    { id: "ey-fruit", businessId: "biz-yogurt", name: "Fruit", isActive: true, sortOrder: 2 },
-    { id: "ey-rent", businessId: "biz-yogurt", name: "Rent", isActive: true, sortOrder: 3 },
+    { id: "e-ice", businessId: "biz-don-mac", name: "Ice", isActive: true, sortOrder: 1, isSuperadminOnly: false },
+    { id: "e-cups", businessId: "biz-don-mac", name: "Cups", isActive: true, sortOrder: 2, isSuperadminOnly: false },
+    { id: "e-milk", businessId: "biz-don-mac", name: "Milk", isActive: true, sortOrder: 3, isSuperadminOnly: false },
+    { id: "e-rent", businessId: "biz-don-mac", name: "Rent", isActive: true, sortOrder: 4, isSuperadminOnly: false },
+    { id: "e-util", businessId: "biz-don-mac", name: "Utilities", isActive: true, sortOrder: 5, isSuperadminOnly: false },
+    { id: "e-other", businessId: "biz-don-mac", name: "Others", isActive: true, sortOrder: 6, isSuperadminOnly: false },
+    { id: "e-refill", businessId: "biz-don-mac", name: "Stock Refill", isActive: true, sortOrder: 7, isSuperadminOnly: true },
+    { id: "el-ice", businessId: "biz-don-lemon", name: "Ice", isActive: true, sortOrder: 1, isSuperadminOnly: false },
+    { id: "el-cups", businessId: "biz-don-lemon", name: "Cups", isActive: true, sortOrder: 2, isSuperadminOnly: false },
+    { id: "el-lemons", businessId: "biz-don-lemon", name: "Lemons", isActive: true, sortOrder: 3, isSuperadminOnly: false },
+    { id: "el-rent", businessId: "biz-don-lemon", name: "Rent", isActive: true, sortOrder: 4, isSuperadminOnly: false },
+    { id: "el-refill", businessId: "biz-don-lemon", name: "Stock Refill", isActive: true, sortOrder: 5, isSuperadminOnly: true },
+    { id: "ey-cups", businessId: "biz-yogurt", name: "Cups", isActive: true, sortOrder: 1, isSuperadminOnly: false },
+    { id: "ey-fruit", businessId: "biz-yogurt", name: "Fruit", isActive: true, sortOrder: 2, isSuperadminOnly: false },
+    { id: "ey-rent", businessId: "biz-yogurt", name: "Rent", isActive: true, sortOrder: 3, isSuperadminOnly: false },
+    { id: "ey-refill", businessId: "biz-yogurt", name: "Stock Refill", isActive: true, sortOrder: 4, isSuperadminOnly: true },
   ],
   sales: [],
   expenses: [],
+  stockItems: [
+    { id: "st-beans", businessId: "biz-don-mac", name: "Coffee", isActive: true, sortOrder: 1 },
+    { id: "st-milk", businessId: "biz-don-mac", name: "Milk", isActive: true, sortOrder: 2 },
+    { id: "st-cups16", businessId: "biz-don-mac", name: "Cups", isActive: true, sortOrder: 3 },
+    { id: "st-lids", businessId: "biz-don-mac", name: "Lids", isActive: true, sortOrder: 4 },
+    { id: "stl-lemons", businessId: "biz-don-lemon", name: "Lemon", isActive: true, sortOrder: 1 },
+    { id: "stl-sugar", businessId: "biz-don-lemon", name: "Big cups", isActive: true, sortOrder: 2 },
+    { id: "sty-cups", businessId: "biz-yogurt", name: "Cups", isActive: true, sortOrder: 1 },
+  ],
+  stockEntries: [],
 };
 
 function withSampleRecords(store: DemoStore): DemoStore {
@@ -264,6 +287,31 @@ function withSampleRecords(store: DemoStore): DemoStore {
       date: y,
       amount: 180,
     },
+    {
+      id: "x3",
+      branchId: "br-don-mac-main",
+      categoryId: "e-refill",
+      date: y,
+      amount: 1450,
+    },
+  ];
+  store.stockEntries = [
+    {
+      id: "k1",
+      branchId: "br-don-mac-main",
+      stockItemId: "st-beans",
+      date: y,
+      added: 10,
+      used: 3,
+    },
+    {
+      id: "k2",
+      branchId: "br-don-mac-main",
+      stockItemId: "st-cups16",
+      date: y,
+      added: 500,
+      used: 29,
+    },
   ];
   return store;
 }
@@ -271,11 +319,40 @@ function withSampleRecords(store: DemoStore): DemoStore {
 let memory: DemoStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
+// A store written before superadmin-only expense types existed carries neither
+// the flag nor a Stock Refill category.
+function backfillSuperadminExpenses(store: DemoStore) {
+  for (const category of store.expenseCategories) {
+    if (typeof category.isSuperadminOnly !== "boolean") {
+      category.isSuperadminOnly = false;
+    }
+  }
+  for (const business of store.businesses) {
+    const forBusiness = store.expenseCategories.filter(
+      (category) => category.businessId === business.id,
+    );
+    if (forBusiness.some((category) => category.isSuperadminOnly)) continue;
+    store.expenseCategories.push({
+      id: crypto.randomUUID(),
+      businessId: business.id,
+      name: "Stock Refill",
+      isActive: true,
+      sortOrder: forBusiness.length + 1,
+      isSuperadminOnly: true,
+    });
+  }
+}
+
 async function loadStore(): Promise<DemoStore> {
   if (memory) return memory;
   try {
     const raw = await readFile(DATA_PATH, "utf8");
-    memory = JSON.parse(raw) as DemoStore;
+    const parsed = JSON.parse(raw) as DemoStore;
+    // A store written before stocks existed is missing these collections.
+    parsed.stockItems ??= structuredClone(seed.stockItems);
+    parsed.stockEntries ??= [];
+    backfillSuperadminExpenses(parsed);
+    memory = parsed;
     return memory;
   } catch {
     memory = withSampleRecords(structuredClone(seed));
@@ -371,6 +448,89 @@ export async function demoExpenseCategories(businessId: string) {
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+export async function demoStockItems(businessId: string) {
+  const store = await loadStore();
+  return store.stockItems
+    .filter((item) => item.businessId === businessId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export async function demoDayStocks(branchId: string, date: string) {
+  const store = await loadStore();
+  const branch = store.branches.find((item) => item.id === branchId);
+  if (!branch) throw new Error("Branch not found.");
+
+  return store.stockItems
+    .filter((item) => item.businessId === branch.businessId)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((item) => {
+      const forItem = store.stockEntries.filter(
+        (entry) => entry.branchId === branchId && entry.stockItemId === item.id,
+      );
+      const opening = forItem
+        .filter((entry) => entry.date < date)
+        .reduce((sum, entry) => sum + entry.added - entry.used, 0);
+      const today = forItem.find((entry) => entry.date === date);
+      return {
+        stockItemId: item.id,
+        name: item.name,
+        isActive: item.isActive,
+        opening,
+        added: today?.added ?? 0,
+        used: today?.used ?? 0,
+      };
+    });
+}
+
+export async function demoSaveStocks(
+  branchId: string,
+  date: string,
+  lines: { stockItemId: string; added: number; used: number }[],
+) {
+  const store = await loadStore();
+  store.stockEntries = store.stockEntries.filter(
+    (item) => !(item.branchId === branchId && item.date === date),
+  );
+  for (const line of lines) {
+    if (line.added <= 0 && line.used <= 0) continue;
+    store.stockEntries.push({
+      id: crypto.randomUUID(),
+      branchId,
+      stockItemId: line.stockItemId,
+      date,
+      added: line.added,
+      used: line.used,
+    });
+  }
+  await persist(store);
+}
+
+export async function demoUpsertStockItem(input: {
+  id?: string;
+  businessId: string;
+  name: string;
+  isActive: boolean;
+}) {
+  const store = await loadStore();
+  if (input.id) {
+    const item = store.stockItems.find((entry) => entry.id === input.id);
+    if (!item) throw new Error("Stock item not found.");
+    item.name = input.name;
+    item.isActive = input.isActive;
+  } else {
+    store.stockItems.push({
+      id: crypto.randomUUID(),
+      businessId: input.businessId,
+      name: input.name,
+      isActive: input.isActive,
+      sortOrder:
+        store.stockItems.filter((item) => item.businessId === input.businessId)
+          .length + 1,
+    });
+  }
+  await persist(store);
+}
+
 export async function demoMonthStatus(
   branchId: string,
   month: string,
@@ -435,10 +595,17 @@ export async function demoSaveExpenses(
   branchId: string,
   date: string,
   lines: { categoryId: string; amount: number }[],
+  editableCategoryIds: string[],
 ) {
   const store = await loadStore();
+  const editable = new Set(editableCategoryIds);
   store.expenses = store.expenses.filter(
-    (item) => !(item.branchId === branchId && item.date === date),
+    (item) =>
+      !(
+        item.branchId === branchId &&
+        item.date === date &&
+        editable.has(item.categoryId)
+      ),
   );
   for (const line of lines) {
     if (line.amount <= 0) continue;
@@ -456,20 +623,32 @@ export async function demoSaveExpenses(
 export async function demoMonthReport(
   branchId: string,
   month: string,
+  includeRefill: boolean,
 ): Promise<MonthReport> {
   const status = await demoMonthStatus(branchId, month);
   const store = await loadStore();
+  const refillIds = new Set(
+    store.expenseCategories
+      .filter((category) => category.isSuperadminOnly)
+      .map((category) => category.id),
+  );
   const days = status.map((day) => {
     const salesTotal = store.sales
       .filter((item) => item.branchId === branchId && item.date === day.date)
       .reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
-    const expenseTotal = store.expenses
-      .filter((item) => item.branchId === branchId && item.date === day.date)
-      .reduce((sum, item) => sum + item.amount, 0);
+    const dayExpenses = store.expenses.filter(
+      (item) => item.branchId === branchId && item.date === day.date,
+    );
+    const expenseTotal = dayExpenses.reduce((sum, item) => sum + item.amount, 0);
     return {
       date: day.date,
       salesTotal,
       expenseTotal,
+      refillTotal: includeRefill
+        ? dayExpenses
+            .filter((item) => refillIds.has(item.categoryId))
+            .reduce((sum, item) => sum + item.amount, 0)
+        : null,
       net: salesTotal - expenseTotal,
       hasSales: day.hasSales,
       hasExpenses: day.hasExpenses,
@@ -481,6 +660,9 @@ export async function demoMonthReport(
     month,
     salesTotal,
     expenseTotal,
+    refillTotal: includeRefill
+      ? days.reduce((sum, day) => sum + (day.refillTotal ?? 0), 0)
+      : null,
     net: salesTotal - expenseTotal,
     days,
   };
@@ -535,6 +717,7 @@ export async function demoUpsertExpenseCategory(input: {
   businessId: string;
   name: string;
   isActive: boolean;
+  isSuperadminOnly: boolean;
 }) {
   const store = await loadStore();
   if (input.id) {
@@ -542,12 +725,14 @@ export async function demoUpsertExpenseCategory(input: {
     if (!category) throw new Error("Category not found.");
     category.name = input.name;
     category.isActive = input.isActive;
+    category.isSuperadminOnly = input.isSuperadminOnly;
   } else {
     store.expenseCategories.push({
       id: crypto.randomUUID(),
       businessId: input.businessId,
       name: input.name,
       isActive: input.isActive,
+      isSuperadminOnly: input.isSuperadminOnly,
       sortOrder:
         store.expenseCategories.filter((item) => item.businessId === input.businessId)
           .length + 1,

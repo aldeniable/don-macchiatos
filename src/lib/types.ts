@@ -36,6 +36,15 @@ export type ExpenseCategory = {
   name: string;
   isActive: boolean;
   sortOrder: number;
+  isSuperadminOnly: boolean;
+};
+
+export type StockItem = {
+  id: string;
+  businessId: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
 };
 
 export type SalesLine = {
@@ -49,6 +58,17 @@ export type ExpenseLine = {
   categoryId: string;
   name: string;
   amount: number;
+  isSuperadminOnly: boolean;
+};
+
+// `opening` is the balance carried in from every earlier day, so
+// `opening + added - used` is the quantity tomorrow starts with.
+export type StockLine = {
+  stockItemId: string;
+  name: string;
+  opening: number;
+  added: number;
+  used: number;
 };
 
 export type DayRecordStatus = {
@@ -61,12 +81,19 @@ export type DayEntry = {
   date: string;
   sales: SalesLine[];
   expenses: ExpenseLine[];
+  stocks: StockLine[];
+  // Amounts recorded against expense types this viewer cannot see. Counted in
+  // the day total so the money is never missing, just unattributed.
+  hiddenExpenseTotal: number;
 };
 
+// `refillTotal` is the slice of `expenseTotal` that sits on superadmin-only
+// expense types, and is null for a viewer who may not see that breakdown.
 export type DailyReportRow = {
   date: string;
   salesTotal: number;
   expenseTotal: number;
+  refillTotal: number | null;
   net: number;
   hasSales: boolean;
   hasExpenses: boolean;
@@ -76,6 +103,7 @@ export type MonthReport = {
   month: string;
   salesTotal: number;
   expenseTotal: number;
+  refillTotal: number | null;
   net: number;
   days: DailyReportRow[];
 };
@@ -105,5 +133,9 @@ export function canManageCatalog(user: SessionUser) {
 }
 
 export function canManageStaff(user: SessionUser) {
+  return user.role === "superadmin";
+}
+
+export function canSeeSuperadminExpenses(user: SessionUser) {
   return user.role === "superadmin";
 }

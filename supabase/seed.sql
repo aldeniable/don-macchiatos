@@ -42,18 +42,19 @@ join (
 ) as p(slug, name, sort_order) on p.slug = b.slug
 on conflict do nothing;
 
-insert into public.expense_categories (business_id, name, sort_order)
-select b.id, c.name, c.sort_order
+insert into public.expense_categories (business_id, name, sort_order, is_superadmin_only)
+select b.id, c.name, c.sort_order, c.is_superadmin_only
 from public.businesses b
 join (
   values
-    ('Ice', 1),
-    ('Cups', 2),
-    ('Milk', 3),
-    ('Rent', 4),
-    ('Utilities', 5),
-    ('Others', 6)
-) as c(name, sort_order) on true
+    ('Ice', 1, false),
+    ('Cups', 2, false),
+    ('Milk', 3, false),
+    ('Rent', 4, false),
+    ('Utilities', 5, false),
+    ('Others', 6, false),
+    ('Stock Refill', 7, true)
+) as c(name, sort_order, is_superadmin_only) on true
 on conflict do nothing;
 
 -- After creating a superadmin auth user, promote them:

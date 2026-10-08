@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Boxes,
   CalendarDays,
   ChartColumn,
   LogOut,
@@ -49,6 +50,11 @@ export function AppShell({
                 href: `/b/${branch.id}/expenses`,
                 label: "Expenses",
                 icon: Receipt,
+              },
+              {
+                href: `/b/${branch.id}/stocks`,
+                label: "Stocks",
+                icon: Boxes,
               },
             ]
           : []),

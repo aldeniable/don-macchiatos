@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { saveExpenseCategoryAction } from "@/app/actions";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -18,9 +19,13 @@ import type { ExpenseCategory } from "@/lib/types";
 export function ExpenseCategoryManager({
   branchId,
   categories,
+  canRestrict,
 }: {
   branchId: string;
   categories: ExpenseCategory[];
+  // Only a superadmin can mark a type as superadmin-only, and only a superadmin
+  // is ever handed one of those types to list here.
+  canRestrict: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ExpenseCategory | null>(null);
@@ -50,6 +55,11 @@ export function ExpenseCategoryManager({
               <p className="text-xs text-muted-foreground">
                 {category.isActive ? "Active" : "Hidden"}
               </p>
+              {category.isSuperadminOnly ? (
+                <Badge variant="secondary" className="mt-1">
+                  Superadmin only
+                </Badge>
+              ) : null}
             </div>
             <Button
               variant="outline"
@@ -89,6 +99,23 @@ export function ExpenseCategoryManager({
               />
               Active
             </label>
+            {canRestrict ? (
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="isSuperadminOnly"
+                  defaultChecked={editing?.isSuperadminOnly ?? false}
+                  className="mt-1"
+                />
+                <span>
+                  Superadmin only
+                  <span className="block text-xs text-muted-foreground">
+                    Admins and staff cannot see or record this type. The amount
+                    still counts toward their expense totals.
+                  </span>
+                </span>
+              </label>
+            ) : null}
             <DialogFooter>
               <Button type="submit" className="h-11 w-full">
                 Save

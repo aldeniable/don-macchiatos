@@ -20,6 +20,7 @@ import type { MonthReport } from "@/lib/types";
 const chartConfig = {
   sales: { label: "Sales", color: "var(--chart-1)" },
   expenses: { label: "Expenses", color: "var(--chart-2)" },
+  refill: { label: "Stock refill", color: "var(--chart-3)" },
 };
 
 export function ReportsView({
@@ -30,12 +31,16 @@ export function ReportsView({
   report: MonthReport;
 }) {
   const [view, setView] = useState<"daily" | "monthly">("monthly");
+  // Expense totals always include stock refills. A null refill total means this
+  // viewer is not a superadmin, so the refill slice stays out of the page.
+  const showRefill = report.refillTotal !== null;
   const chartData = useMemo(
     () =>
       report.days.map((day) => ({
         date: day.date.slice(8),
         sales: day.salesTotal,
-        expenses: day.expenseTotal,
+        expenses: day.expenseTotal - (day.refillTotal ?? 0),
+        refill: day.refillTotal ?? 0,
       })),
     [report.days],
   );
@@ -43,9 +48,12 @@ export function ReportsView({
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold">Reports</h1>
-      <div className="grid grid-cols-3 gap-2">
+      <div className={showRefill ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}>
         <Stat label="Sales" value={pesos(report.salesTotal)} />
         <Stat label="Expenses" value={pesos(report.expenseTotal)} />
+        {showRefill ? (
+          <Stat label="Stock refill" value={pesos(report.refillTotal ?? 0)} />
+        ) : null}
         <Stat label="Net" value={pesos(report.net)} />
       </div>
       <Tabs value={view} onValueChange={(value) => setView(value as "daily" | "monthly")}>
@@ -67,7 +75,22 @@ export function ReportsView({
                     <YAxis hide />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar dataKey="sales" fill="var(--chart-1)" radius={4} />
-                    <Bar dataKey="expenses" fill="var(--chart-2)" radius={4} />
+                    {/* Refills stack on top of the rest of the expenses, so the
+                        bar still stands for every peso spent that day. */}
+                    <Bar
+                      dataKey="expenses"
+                      stackId="expenses"
+                      fill="var(--chart-2)"
+                      radius={showRefill ? [0, 0, 4, 4] : 4}
+                    />
+                    {showRefill ? (
+                      <Bar
+                        dataKey="refill"
+                        stackId="expenses"
+                        fill="var(--chart-3)"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    ) : null}
                   </BarChart>
                 </ChartContainer>
               ) : (
@@ -83,6 +106,9 @@ export function ReportsView({
                 <TableHead>Date</TableHead>
                 <TableHead className="text-right">Sales</TableHead>
                 <TableHead className="text-right">Exp.</TableHead>
+                {showRefill ? (
+                  <TableHead className="text-right">Refill</TableHead>
+                ) : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -95,6 +121,11 @@ export function ReportsView({
                   </TableCell>
                   <TableCell className="text-right">{pesos(day.salesTotal)}</TableCell>
                   <TableCell className="text-right">{pesos(day.expenseTotal)}</TableCell>
+                  {showRefill ? (
+                    <TableCell className="text-right">
+                      {pesos(day.refillTotal ?? 0)}
+                    </TableCell>
+                  ) : null}
                 </TableRow>
               ))}
             </TableBody>

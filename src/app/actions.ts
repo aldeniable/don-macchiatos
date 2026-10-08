@@ -10,11 +10,13 @@ import {
   homePathFor,
   saveDayExpenses,
   saveDaySales,
+  saveDayStocks,
   setBranchPrice,
   signIn,
   signOut,
   upsertExpenseCategory,
   upsertProduct,
+  upsertStockItem,
 } from "@/lib/data";
 import type { Role } from "@/lib/types";
 
@@ -88,6 +90,40 @@ export async function saveExpensesAction(formData: FormData) {
   revalidatePath(`/b/${branchId}/reports`);
 }
 
+export async function saveStocksAction(formData: FormData) {
+  const branchId = String(formData.get("branchId") ?? "");
+  const date = String(formData.get("date") ?? "");
+  if (!branchId || !date || isFutureDate(date)) {
+    throw new Error("Invalid date.");
+  }
+  const stockItemIds = formData.getAll("stockItemId").map(String);
+  const added = formData.getAll("added").map((value) => Number(value) || 0);
+  const used = formData.getAll("used").map((value) => Number(value) || 0);
+  await saveDayStocks(
+    branchId,
+    date,
+    stockItemIds.map((stockItemId, index) => ({
+      stockItemId,
+      added: Math.max(0, Math.round(added[index] ?? 0)),
+      used: Math.max(0, Math.round(used[index] ?? 0)),
+    })),
+  );
+  revalidatePath(`/b/${branchId}`);
+  revalidatePath(`/b/${branchId}/day/${date}`);
+  revalidatePath(`/b/${branchId}/stocks`);
+}
+
+export async function saveStockItemAction(formData: FormData) {
+  const branchId = String(formData.get("branchId") ?? "");
+  await upsertStockItem({
+    branchId,
+    id: String(formData.get("id") ?? "") || undefined,
+    name: String(formData.get("name") ?? "").trim(),
+    isActive: formData.get("isActive") === "on",
+  });
+  revalidatePath(`/b/${branchId}/stocks`);
+}
+
 export async function saveProductAction(formData: FormData) {
   const branchId = String(formData.get("branchId") ?? "");
   const productId = await upsertProduct({
@@ -119,8 +155,10 @@ export async function saveExpenseCategoryAction(formData: FormData) {
     id: String(formData.get("id") ?? "") || undefined,
     name: String(formData.get("name") ?? "").trim(),
     isActive: formData.get("isActive") === "on",
+    isSuperadminOnly: formData.get("isSuperadminOnly") === "on",
   });
   revalidatePath(`/b/${branchId}/expenses`);
+  revalidatePath(`/b/${branchId}`);
 }
 
 export async function createStaffAction(formData: FormData) {

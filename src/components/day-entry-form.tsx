@@ -1,14 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { saveExpensesAction, saveSalesAction } from "@/app/actions";
+import {
+  saveExpensesAction,
+  saveSalesAction,
+  saveStocksAction,
+} from "@/app/actions";
 import { QuantityStepper } from "@/components/quantity-stepper";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatLongDate } from "@/lib/dates";
-import { pesos } from "@/lib/money";
+import { formatQty, pesos } from "@/lib/money";
 import type { DayEntry } from "@/lib/types";
 
 export function DayEntryForm({
@@ -20,13 +25,16 @@ export function DayEntryForm({
 }) {
   const [sales, setSales] = useState(entry.sales);
   const [expenses, setExpenses] = useState(entry.expenses);
+  const [stocks, setStocks] = useState(entry.stocks);
   const salesTotal = useMemo(
     () => sales.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0),
     [sales],
   );
   const expenseTotal = useMemo(
-    () => expenses.reduce((sum, line) => sum + line.amount, 0),
-    [expenses],
+    () =>
+      expenses.reduce((sum, line) => sum + line.amount, 0) +
+      entry.hiddenExpenseTotal,
+    [expenses, entry.hiddenExpenseTotal],
   );
 
   return (
@@ -38,12 +46,15 @@ export function DayEntryForm({
         </p>
       </div>
       <Tabs defaultValue="sales">
-        <TabsList className="grid h-12 w-full grid-cols-2">
+        <TabsList className="grid h-12 w-full grid-cols-3">
           <TabsTrigger value="sales" className="text-base">
             Sales
           </TabsTrigger>
           <TabsTrigger value="expenses" className="text-base">
             Expenses
+          </TabsTrigger>
+          <TabsTrigger value="stocks" className="text-base">
+            Stocks
           </TabsTrigger>
         </TabsList>
         <TabsContent value="sales">
@@ -88,6 +99,11 @@ export function DayEntryForm({
                 <CardContent className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium">{line.name}</p>
+                    {line.isSuperadminOnly ? (
+                      <Badge variant="secondary" className="mt-1">
+                        Superadmin only
+                      </Badge>
+                    ) : null}
                     <input type="hidden" name="categoryId" value={line.categoryId} />
                   </div>
                   <div className="flex items-center gap-2">
@@ -117,6 +133,83 @@ export function DayEntryForm({
               Save expenses
             </Button>
           </form>
+        </TabsContent>
+        <TabsContent value="stocks">
+          {stocks.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No stock items yet for this business.
+            </p>
+          ) : (
+            <form action={saveStocksAction} className="flex flex-col gap-3">
+              <input type="hidden" name="branchId" value={branchId} />
+              <input type="hidden" name="date" value={entry.date} />
+              {stocks.map((line, index) => {
+                const closing = line.opening + line.added - line.used;
+                return (
+                  <Card key={line.stockItemId}>
+                    <CardContent className="flex flex-col gap-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <p className="min-w-0 truncate font-medium">{line.name}</p>
+                        <p className="shrink-0 text-sm">
+                          <span className="text-xs text-muted-foreground">
+                            on hand{" "}
+                          </span>
+                          <span
+                            className={
+                              closing < 0
+                                ? "font-semibold text-destructive"
+                                : "font-semibold"
+                            }
+                          >
+                            {formatQty(closing)}
+                          </span>
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Started with {formatQty(line.opening)}
+                      </p>
+                      <input
+                        type="hidden"
+                        name="stockItemId"
+                        value={line.stockItemId}
+                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm">Added</span>
+                        <QuantityStepper
+                          name="added"
+                          defaultValue={line.added}
+                          onValueChange={(value) => {
+                            setStocks((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, added: value } : item,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm">Used</span>
+                        <QuantityStepper
+                          name="used"
+                          defaultValue={line.used}
+                          onValueChange={(value) => {
+                            setStocks((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, used: value } : item,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              <Button type="submit" className="h-12 text-base">
+                Save stocks
+              </Button>
+            </form>
+          )}
         </TabsContent>
       </Tabs>
     </div>
