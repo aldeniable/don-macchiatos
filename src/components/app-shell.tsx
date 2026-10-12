@@ -7,6 +7,7 @@ import {
   Boxes,
   CalendarDays,
   ChartColumn,
+  Landmark,
   LogOut,
   Package,
   Receipt,
@@ -34,6 +35,8 @@ export function AppShell({
   const links = branch
     ? [
         { href: `/b/${branch.id}`, label: "Calendar", icon: CalendarDays },
+        // Staff walk the cash to the bank, so this sits outside the admin links.
+        { href: `/b/${branch.id}/deposits`, label: "Deposits", icon: Landmark },
         ...(admin
           ? [
               {

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ReportsView } from "@/components/reports-view";
 import { buttonVariants } from "@/components/ui/button";
-import { getMonthReport } from "@/lib/data";
+import { getCashReport, getMonthReport } from "@/lib/data";
 import { manilaToday, monthKey, parseMonthKey, shiftMonth } from "@/lib/dates";
 
 export default async function ReportsPage({
@@ -19,7 +19,10 @@ export default async function ReportsPage({
   const { year, month: monthNumber } = parseMonthKey(month);
   const previous = shiftMonth(year, monthNumber, -1);
   const next = shiftMonth(year, monthNumber, 1);
-  const report = await getMonthReport(branchId, month);
+  const [report, cash] = await Promise.all([
+    getMonthReport(branchId, month),
+    getCashReport(branchId, month),
+  ]);
   const title = new Date(year, monthNumber - 1, 1).toLocaleDateString("en-PH", {
     month: "long",
     year: "numeric",
@@ -44,7 +47,7 @@ export default async function ReportsPage({
           <ChevronRight />
         </Link>
       </div>
-      <ReportsView branchId={branchId} report={report} />
+      <ReportsView branchId={branchId} report={report} cash={cash} />
     </div>
   );
 }

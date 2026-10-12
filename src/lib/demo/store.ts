@@ -3,7 +3,10 @@ import path from "node:path";
 import { manilaToday } from "@/lib/dates";
 import type {
   Branch,
+  BranchCashPosition,
   Business,
+  CashDeposit,
+  CashLedgerRow,
   DayRecordStatus,
   ExpenseCategory,
   MonthReport,
@@ -37,7 +40,8 @@ type DemoStore = {
     branchId: string;
     productId: string;
     date: string;
-    quantity: number;
+    cashQuantity: number;
+    onlineQuantity: number;
     unitPriceSnapshot: number;
   }[];
   expenses: {
@@ -45,7 +49,8 @@ type DemoStore = {
     branchId: string;
     categoryId: string;
     date: string;
-    amount: number;
+    cashAmount: number;
+    onlineAmount: number;
   }[];
   stockItems: StockItem[];
   stockEntries: {
@@ -55,6 +60,16 @@ type DemoStore = {
     date: string;
     added: number;
     used: number;
+  }[];
+  cashDeposits: {
+    id: string;
+    branchId: string;
+    date: string;
+    amount: number;
+    reference: string | null;
+    note: string | null;
+    recordedByName: string;
+    updatedByName: string;
   }[];
 };
 
@@ -246,6 +261,7 @@ const seed: DemoStore = {
     { id: "sty-cups", businessId: "biz-yogurt", name: "Cups", isActive: true, sortOrder: 1 },
   ],
   stockEntries: [],
+  cashDeposits: [],
 };
 
 function withSampleRecords(store: DemoStore): DemoStore {
@@ -260,7 +276,8 @@ function withSampleRecords(store: DemoStore): DemoStore {
       branchId: "br-don-mac-main",
       productId: "p-spanish",
       date: y,
-      quantity: 18,
+      cashQuantity: 12,
+      onlineQuantity: 6,
       unitPriceSnapshot: 120,
     },
     {
@@ -268,7 +285,8 @@ function withSampleRecords(store: DemoStore): DemoStore {
       branchId: "br-don-mac-main",
       productId: "p-caramel",
       date: y,
-      quantity: 11,
+      cashQuantity: 7,
+      onlineQuantity: 4,
       unitPriceSnapshot: 135,
     },
   ];
@@ -278,21 +296,24 @@ function withSampleRecords(store: DemoStore): DemoStore {
       branchId: "br-don-mac-main",
       categoryId: "e-ice",
       date: y,
-      amount: 250,
+      cashAmount: 250,
+      onlineAmount: 0,
     },
     {
       id: "x2",
       branchId: "br-don-mac-main",
       categoryId: "e-cups",
       date: y,
-      amount: 180,
+      cashAmount: 180,
+      onlineAmount: 0,
     },
     {
       id: "x3",
       branchId: "br-don-mac-main",
       categoryId: "e-refill",
       date: y,
-      amount: 1450,
+      cashAmount: 0,
+      onlineAmount: 1450,
     },
   ];
   store.stockEntries = [
@@ -311,6 +332,18 @@ function withSampleRecords(store: DemoStore): DemoStore {
       date: y,
       added: 500,
       used: 29,
+    },
+  ];
+  store.cashDeposits = [
+    {
+      id: "d1",
+      branchId: "br-don-mac-main",
+      date: y,
+      amount: 1500,
+      reference: "BPI-004812",
+      note: null,
+      recordedByName: "Don Mac Staff",
+      updatedByName: "",
     },
   ];
   return store;
@@ -343,6 +376,41 @@ function backfillSuperadminExpenses(store: DemoStore) {
   }
 }
 
+// A store written before sales were split by payment method carries one
+// untagged count per row, which is read as cash.
+function backfillSalesPaymentSplit(store: DemoStore) {
+  for (const row of store.sales as (DemoStore["sales"][number] & {
+    quantity?: number;
+  })[]) {
+    if (typeof row.cashQuantity === "number") continue;
+    row.cashQuantity = row.quantity ?? 0;
+    row.onlineQuantity = 0;
+    delete row.quantity;
+  }
+}
+
+// A store written before expenses were split by payment method carries one
+// untagged amount per row. A superadmin-only type is the owner paying a supplier
+// himself and never touches the drawer, so it is read as online; everything else
+// came out of the branch's cash.
+function backfillExpensePaymentSplit(store: DemoStore) {
+  const superadminOnly = new Set(
+    store.expenseCategories
+      .filter((category) => category.isSuperadminOnly)
+      .map((category) => category.id),
+  );
+  for (const row of store.expenses as (DemoStore["expenses"][number] & {
+    amount?: number;
+  })[]) {
+    if (typeof row.cashAmount === "number") continue;
+    const amount = row.amount ?? 0;
+    const online = superadminOnly.has(row.categoryId);
+    row.cashAmount = online ? 0 : amount;
+    row.onlineAmount = online ? amount : 0;
+    delete row.amount;
+  }
+}
+
 async function loadStore(): Promise<DemoStore> {
   if (memory) return memory;
   try {
@@ -351,7 +419,11 @@ async function loadStore(): Promise<DemoStore> {
     // A store written before stocks existed is missing these collections.
     parsed.stockItems ??= structuredClone(seed.stockItems);
     parsed.stockEntries ??= [];
+    // A store written before the deposit log existed is missing this one.
+    parsed.cashDeposits ??= [];
     backfillSuperadminExpenses(parsed);
+    backfillSalesPaymentSplit(parsed);
+    backfillExpensePaymentSplit(parsed);
     memory = parsed;
     return memory;
   } catch {
@@ -571,20 +643,26 @@ export async function demoDayExpenses(branchId: string, date: string) {
 export async function demoSaveSales(
   branchId: string,
   date: string,
-  lines: { productId: string; quantity: number; unitPrice: number }[],
+  lines: {
+    productId: string;
+    cashQuantity: number;
+    onlineQuantity: number;
+    unitPrice: number;
+  }[],
 ) {
   const store = await loadStore();
   store.sales = store.sales.filter(
     (item) => !(item.branchId === branchId && item.date === date),
   );
   for (const line of lines) {
-    if (line.quantity <= 0) continue;
+    if (line.cashQuantity <= 0 && line.onlineQuantity <= 0) continue;
     store.sales.push({
       id: crypto.randomUUID(),
       branchId,
       productId: line.productId,
       date,
-      quantity: line.quantity,
+      cashQuantity: line.cashQuantity,
+      onlineQuantity: line.onlineQuantity,
       unitPriceSnapshot: line.unitPrice,
     });
   }
@@ -594,7 +672,7 @@ export async function demoSaveSales(
 export async function demoSaveExpenses(
   branchId: string,
   date: string,
-  lines: { categoryId: string; amount: number }[],
+  lines: { categoryId: string; cashAmount: number; onlineAmount: number }[],
   editableCategoryIds: string[],
 ) {
   const store = await loadStore();
@@ -608,13 +686,14 @@ export async function demoSaveExpenses(
       ),
   );
   for (const line of lines) {
-    if (line.amount <= 0) continue;
+    if (line.cashAmount <= 0 && line.onlineAmount <= 0) continue;
     store.expenses.push({
       id: crypto.randomUUID(),
       branchId,
       categoryId: line.categoryId,
       date,
-      amount: line.amount,
+      cashAmount: line.cashAmount,
+      onlineAmount: line.onlineAmount,
     });
   }
   await persist(store);
@@ -633,21 +712,35 @@ export async function demoMonthReport(
       .map((category) => category.id),
   );
   const days = status.map((day) => {
-    const salesTotal = store.sales
-      .filter((item) => item.branchId === branchId && item.date === day.date)
-      .reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
+    const daySales = store.sales.filter(
+      (item) => item.branchId === branchId && item.date === day.date,
+    );
+    const cashTotal = daySales.reduce(
+      (sum, item) => sum + item.cashQuantity * item.unitPriceSnapshot,
+      0,
+    );
+    const onlineTotal = daySales.reduce(
+      (sum, item) => sum + item.onlineQuantity * item.unitPriceSnapshot,
+      0,
+    );
+    const salesTotal = cashTotal + onlineTotal;
     const dayExpenses = store.expenses.filter(
       (item) => item.branchId === branchId && item.date === day.date,
     );
-    const expenseTotal = dayExpenses.reduce((sum, item) => sum + item.amount, 0);
+    const expenseTotal = dayExpenses.reduce(
+      (sum, item) => sum + item.cashAmount + item.onlineAmount,
+      0,
+    );
     return {
       date: day.date,
       salesTotal,
+      cashTotal,
+      onlineTotal,
       expenseTotal,
       refillTotal: includeRefill
         ? dayExpenses
             .filter((item) => refillIds.has(item.categoryId))
-            .reduce((sum, item) => sum + item.amount, 0)
+            .reduce((sum, item) => sum + item.cashAmount + item.onlineAmount, 0)
         : null,
       net: salesTotal - expenseTotal,
       hasSales: day.hasSales,
@@ -659,6 +752,8 @@ export async function demoMonthReport(
   return {
     month,
     salesTotal,
+    cashTotal: days.reduce((sum, day) => sum + day.cashTotal, 0),
+    onlineTotal: days.reduce((sum, day) => sum + day.onlineTotal, 0),
     expenseTotal,
     refillTotal: includeRefill
       ? days.reduce((sum, day) => sum + (day.refillTotal ?? 0), 0)
@@ -739,6 +834,165 @@ export async function demoUpsertExpenseCategory(input: {
     });
   }
   await persist(store);
+}
+
+function toDemoDeposit(row: DemoStore["cashDeposits"][number]): CashDeposit {
+  return {
+    id: row.id,
+    branchId: row.branchId,
+    depositDate: row.date,
+    amount: row.amount,
+    reference: row.reference,
+    note: row.note,
+    recordedByName: row.recordedByName,
+    updatedByName: row.updatedByName,
+  };
+}
+
+export async function demoListDeposits(
+  branchId: string,
+  month?: string,
+): Promise<CashDeposit[]> {
+  const store = await loadStore();
+  return store.cashDeposits
+    .filter(
+      (item) =>
+        item.branchId === branchId && (!month || item.date.startsWith(month)),
+    )
+    .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1))
+    .map(toDemoDeposit);
+}
+
+export async function demoUpsertDeposit(input: {
+  id?: string;
+  branchId: string;
+  depositDate: string;
+  amount: number;
+  reference: string | null;
+  note: string | null;
+  recordedByName: string;
+}) {
+  const store = await loadStore();
+  if (
+    input.reference &&
+    store.cashDeposits.some(
+      (item) =>
+        item.id !== input.id &&
+        item.branchId === input.branchId &&
+        item.reference?.toLowerCase() === input.reference?.toLowerCase(),
+    )
+  ) {
+    throw new Error("That deposit reference is already logged.");
+  }
+  if (input.id) {
+    const deposit = store.cashDeposits.find((item) => item.id === input.id);
+    if (!deposit || deposit.branchId !== input.branchId) {
+      throw new Error("Deposit not found.");
+    }
+    deposit.date = input.depositDate;
+    deposit.amount = input.amount;
+    deposit.reference = input.reference;
+    deposit.note = input.note;
+    deposit.updatedByName = input.recordedByName;
+  } else {
+    store.cashDeposits.push({
+      id: crypto.randomUUID(),
+      branchId: input.branchId,
+      date: input.depositDate,
+      amount: input.amount,
+      reference: input.reference,
+      note: input.note,
+      recordedByName: input.recordedByName,
+      updatedByName: "",
+    });
+  }
+  await persist(store);
+}
+
+export async function demoDeleteDeposit(branchId: string, id: string) {
+  const store = await loadStore();
+  store.cashDeposits = store.cashDeposits.filter(
+    (item) => !(item.id === id && item.branchId === branchId),
+  );
+  await persist(store);
+}
+
+// Mirrors public.cash_day_state: every day with cash movement up to p_end gets a
+// running balance, and only then is the range narrowed, so the first row still
+// carries the opening balance in.
+export async function demoCashLedger(
+  branchId: string,
+  start: string,
+  end: string,
+): Promise<CashLedgerRow[]> {
+  const store = await loadStore();
+  const daily = new Map<
+    string,
+    { cashSales: number; cashExpenses: number; deposited: number }
+  >();
+  const at = (date: string) => {
+    const existing = daily.get(date);
+    if (existing) return existing;
+    const fresh = { cashSales: 0, cashExpenses: 0, deposited: 0 };
+    daily.set(date, fresh);
+    return fresh;
+  };
+
+  for (const row of store.sales) {
+    if (row.branchId !== branchId || row.date > end) continue;
+    at(row.date).cashSales += row.cashQuantity * row.unitPriceSnapshot;
+  }
+  for (const row of store.expenses) {
+    if (row.branchId !== branchId || row.date > end) continue;
+    at(row.date).cashExpenses += row.cashAmount;
+  }
+  for (const row of store.cashDeposits) {
+    if (row.branchId !== branchId || row.date > end) continue;
+    at(row.date).deposited += row.amount;
+  }
+
+  let running = 0;
+  return [...daily.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([date, totals]) => {
+      running += totals.cashSales - totals.cashExpenses - totals.deposited;
+      return { date, ...totals, onHand: running };
+    })
+    .filter((row) => row.date >= start);
+}
+
+export async function demoCashPositions(
+  user: SessionUser,
+  through: string,
+  branchId?: string,
+): Promise<BranchCashPosition[]> {
+  const store = await loadStore();
+  const branches = store.branches.filter((branch) => {
+    if (branchId && branch.id !== branchId) return false;
+    return user.role === "superadmin" || branch.id === user.branchId;
+  });
+
+  return branches.map((branch) => {
+    const cashSales = store.sales
+      .filter((row) => row.branchId === branch.id && row.date <= through)
+      .reduce((sum, row) => sum + row.cashQuantity * row.unitPriceSnapshot, 0);
+    const cashExpenses = store.expenses
+      .filter((row) => row.branchId === branch.id && row.date <= through)
+      .reduce((sum, row) => sum + row.cashAmount, 0);
+    const deposits = store.cashDeposits
+      .filter((row) => row.branchId === branch.id && row.date <= through)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+    const deposited = deposits.reduce((sum, row) => sum + row.amount, 0);
+    return {
+      branchId: branch.id,
+      cashSales,
+      cashExpenses,
+      deposited,
+      onHand: cashSales - cashExpenses - deposited,
+      lastDepositDate: deposits[0]?.date ?? null,
+      lastDepositAmount: deposits[0]?.amount ?? null,
+    };
+  });
 }
 
 export async function demoListStaff(): Promise<StaffMember[]> {

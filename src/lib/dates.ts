@@ -7,6 +7,7 @@ import {
   isSameDay,
   parseISO,
   startOfMonth,
+  startOfWeek,
 } from "date-fns";
 
 export const MANILA_TZ = "Asia/Manila";
@@ -57,6 +58,11 @@ export function parseMonthKey(value: string) {
   return { year, month };
 }
 
+export function monthEndKey(month: string) {
+  const { year, month: monthNumber } = parseMonthKey(month);
+  return toDateKey(endOfMonth(new Date(year, monthNumber - 1, 1)));
+}
+
 export function monthDateRange(month: string) {
   const { year, month: monthNumber } = parseMonthKey(month);
   const next = shiftMonth(year, monthNumber, 1);
@@ -70,6 +76,10 @@ export function entryDateKey(value: string) {
   return value.slice(0, 10);
 }
 
+export function previousDateKey(date: string) {
+  return toDateKey(addDays(parseDateKey(date), -1));
+}
+
 export function formatLongDate(date: string) {
   return parseISO(date).toLocaleDateString("en-PH", {
     weekday: "short",
@@ -78,4 +88,27 @@ export function formatLongDate(date: string) {
     year: "numeric",
     timeZone: MANILA_TZ,
   });
+}
+
+export function formatShortDate(date: string) {
+  return format(parseDateKey(date), "MMM d");
+}
+
+// Cash is deposited on Mondays and Fridays, so weeks run Monday to Sunday: the
+// week a deposit day opens is the week it is read against.
+export function weekStartKey(date: string) {
+  return toDateKey(startOfWeek(parseDateKey(date), { weekStartsOn: 1 }));
+}
+
+export function formatWeekLabel(weekStart: string) {
+  const end = addDays(parseDateKey(weekStart), 6);
+  return `${format(parseDateKey(weekStart), "MMM d")} – ${format(end, "MMM d")}`;
+}
+
+// The owner's employees deposit every Monday and Friday. This only drives a
+// reminder, never a rule: a holiday or a closed day moves the trip, and a hard
+// constraint would turn that into a false alarm.
+export function isDepositDay(date: string) {
+  const day = parseDateKey(date).getDay();
+  return day === 1 || day === 5;
 }

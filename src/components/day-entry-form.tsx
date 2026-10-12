@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Banknote, Smartphone } from "lucide-react";
 import {
   saveExpensesAction,
   saveSalesAction,
@@ -26,16 +27,27 @@ export function DayEntryForm({
   const [sales, setSales] = useState(entry.sales);
   const [expenses, setExpenses] = useState(entry.expenses);
   const [stocks, setStocks] = useState(entry.stocks);
-  const salesTotal = useMemo(
-    () => sales.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0),
+  const cashTotal = useMemo(
+    () => sales.reduce((sum, line) => sum + line.cashQuantity * line.unitPrice, 0),
     [sales],
   );
-  const expenseTotal = useMemo(
-    () =>
-      expenses.reduce((sum, line) => sum + line.amount, 0) +
-      entry.hiddenExpenseTotal,
-    [expenses, entry.hiddenExpenseTotal],
+  const onlineTotal = useMemo(
+    () => sales.reduce((sum, line) => sum + line.onlineQuantity * line.unitPrice, 0),
+    [sales],
   );
+  const salesTotal = cashTotal + onlineTotal;
+  const cashExpenseTotal = useMemo(
+    () => expenses.reduce((sum, line) => sum + line.cashAmount, 0),
+    [expenses],
+  );
+  const onlineExpenseTotal = useMemo(
+    () => expenses.reduce((sum, line) => sum + line.onlineAmount, 0),
+    [expenses],
+  );
+  // The hidden slice belongs to expense types this viewer cannot see, so it is
+  // in the total but not attributed to either payment method.
+  const expenseTotal =
+    cashExpenseTotal + onlineExpenseTotal + entry.hiddenExpenseTotal;
 
   return (
     <div className="flex flex-col gap-4">
@@ -61,30 +73,86 @@ export function DayEntryForm({
           <form action={saveSalesAction} className="flex flex-col gap-3">
             <input type="hidden" name="branchId" value={branchId} />
             <input type="hidden" name="date" value={entry.date} />
-            {sales.map((line, index) => (
-              <Card key={line.productId}>
-                <CardContent className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">{line.name}</p>
+            <Card>
+              <CardContent className="grid grid-cols-3 gap-2 text-center">
+                <SalesTotal label="Total" value={salesTotal} />
+                <SalesTotal
+                  label={
+                    <>
+                      <Banknote className="size-3.5" />
+                      Cash
+                    </>
+                  }
+                  value={cashTotal}
+                />
+                <SalesTotal
+                  label={
+                    <>
+                      <Smartphone className="size-3.5" />
+                      Online
+                    </>
+                  }
+                  value={onlineTotal}
+                />
+              </CardContent>
+            </Card>
+            {sales.map((line, index) => {
+              const quantity = line.cashQuantity + line.onlineQuantity;
+              return (
+                <Card key={line.productId}>
+                  <CardContent className="flex flex-col gap-3">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="min-w-0 truncate font-medium">{line.name}</p>
+                      <p className="shrink-0 text-sm font-semibold">
+                        {pesos(quantity * line.unitPrice)}
+                      </p>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      {pesos(line.unitPrice)} · {pesos(line.quantity * line.unitPrice)}
+                      {pesos(line.unitPrice)} each · {formatQty(quantity)} sold
                     </p>
                     <input type="hidden" name="productId" value={line.productId} />
-                  </div>
-                  <QuantityStepper
-                    name="quantity"
-                    defaultValue={line.quantity}
-                    onValueChange={(value) => {
-                      setSales((current) =>
-                        current.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, quantity: value } : item,
-                        ),
-                      );
-                    }}
-                  />
-                </CardContent>
-              </Card>
-            ))}
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-1.5 text-sm">
+                        <Banknote className="size-4 text-muted-foreground" />
+                        Cash
+                      </span>
+                      <QuantityStepper
+                        name="cashQuantity"
+                        defaultValue={line.cashQuantity}
+                        onValueChange={(value) => {
+                          setSales((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, cashQuantity: value }
+                                : item,
+                            ),
+                          );
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-1.5 text-sm">
+                        <Smartphone className="size-4 text-muted-foreground" />
+                        Online
+                      </span>
+                      <QuantityStepper
+                        name="onlineQuantity"
+                        defaultValue={line.onlineQuantity}
+                        onValueChange={(value) => {
+                          setSales((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, onlineQuantity: value }
+                                : item,
+                            ),
+                          );
+                        }}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
             <Button type="submit" className="h-12 text-base">
               Save sales
             </Button>
@@ -94,38 +162,77 @@ export function DayEntryForm({
           <form action={saveExpensesAction} className="flex flex-col gap-3">
             <input type="hidden" name="branchId" value={branchId} />
             <input type="hidden" name="date" value={entry.date} />
+            <Card>
+              <CardContent className="grid grid-cols-3 gap-2 text-center">
+                <SalesTotal label="Total" value={expenseTotal} />
+                <SalesTotal
+                  label={
+                    <>
+                      <Banknote className="size-3.5" />
+                      Cash
+                    </>
+                  }
+                  value={cashExpenseTotal}
+                />
+                <SalesTotal
+                  label={
+                    <>
+                      <Smartphone className="size-3.5" />
+                      Online
+                    </>
+                  }
+                  value={onlineExpenseTotal}
+                />
+              </CardContent>
+            </Card>
+            <p className="text-xs text-muted-foreground">
+              Cash means it came out of the drawer, so it never reaches the bank.
+            </p>
             {expenses.map((line, index) => (
               <Card key={line.categoryId}>
-                <CardContent className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">{line.name}</p>
-                    {line.isSuperadminOnly ? (
-                      <Badge variant="secondary" className="mt-1">
-                        Superadmin only
-                      </Badge>
-                    ) : null}
-                    <input type="hidden" name="categoryId" value={line.categoryId} />
+                <CardContent className="flex flex-col gap-3">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="min-w-0 truncate font-medium">{line.name}</p>
+                    <p className="shrink-0 text-sm font-semibold">
+                      {pesos(line.cashAmount + line.onlineAmount)}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">PHP</span>
-                    <Input
-                      name="amount"
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      step="0.01"
-                      defaultValue={line.amount}
-                      className="h-11 w-28 text-base"
-                      onChange={(event) => {
-                        const value = Number(event.target.value) || 0;
-                        setExpenses((current) =>
-                          current.map((item, itemIndex) =>
-                            itemIndex === index ? { ...item, amount: value } : item,
-                          ),
-                        );
-                      }}
-                    />
-                  </div>
+                  {line.isSuperadminOnly ? (
+                    <Badge variant="secondary" className="w-fit">
+                      Superadmin only
+                    </Badge>
+                  ) : null}
+                  <input type="hidden" name="categoryId" value={line.categoryId} />
+                  <AmountRow
+                    icon={<Banknote className="size-4 text-muted-foreground" />}
+                    label="Cash"
+                    name="cashAmount"
+                    defaultValue={line.cashAmount}
+                    onValueChange={(value) => {
+                      setExpenses((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, cashAmount: value }
+                            : item,
+                        ),
+                      );
+                    }}
+                  />
+                  <AmountRow
+                    icon={<Smartphone className="size-4 text-muted-foreground" />}
+                    label="Online"
+                    name="onlineAmount"
+                    defaultValue={line.onlineAmount}
+                    onValueChange={(value) => {
+                      setExpenses((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, onlineAmount: value }
+                            : item,
+                        ),
+                      );
+                    }}
+                  />
                 </CardContent>
               </Card>
             ))}
@@ -212,6 +319,53 @@ export function DayEntryForm({
           )}
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function AmountRow({
+  icon,
+  label,
+  name,
+  defaultValue,
+  onValueChange,
+}: {
+  icon: ReactNode;
+  label: string;
+  name: string;
+  defaultValue: number;
+  onValueChange: (value: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="flex items-center gap-1.5 text-sm">
+        {icon}
+        {label}
+      </span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted-foreground">PHP</span>
+        <Input
+          name={name}
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step="0.01"
+          defaultValue={defaultValue}
+          className="h-11 w-28 text-base"
+          onChange={(event) => onValueChange(Number(event.target.value) || 0)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SalesTotal({ label, value }: { label: ReactNode; value: number }) {
+  return (
+    <div>
+      <p className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
+        {label}
+      </p>
+      <p className="text-sm font-semibold">{pesos(value)}</p>
     </div>
   );
 }

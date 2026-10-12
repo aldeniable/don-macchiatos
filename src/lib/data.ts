@@ -3,15 +3,19 @@ import { redirect } from "next/navigation";
 import { isDemoMode } from "@/lib/config";
 import {
   DEMO_COOKIE,
+  demoCashLedger,
+  demoCashPositions,
   demoCreateStaff,
   demoDayExpenses,
   demoDaySales,
   demoDayStocks,
+  demoDeleteDeposit,
   demoExpenseCategories,
   demoGetBranch,
   demoGetUser,
   demoListBranches,
   demoListBusinesses,
+  demoListDeposits,
   demoListStaff,
   demoMonthReport,
   demoMonthStatus,
@@ -22,13 +26,22 @@ import {
   demoSetPrice,
   demoSignIn,
   demoStockItems,
+  demoUpsertDeposit,
   demoUpsertExpenseCategory,
   demoUpsertProduct,
   demoUpsertStockItem,
 } from "@/lib/demo/store";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { entryDateKey, monthDateRange } from "@/lib/dates";
+import {
+  entryDateKey,
+  formatWeekLabel,
+  manilaToday,
+  monthDateRange,
+  monthEndKey,
+  previousDateKey,
+  weekStartKey,
+} from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import {
   canAdminBranch,
@@ -37,6 +50,11 @@ import {
   canManageStaff,
   canSeeSuperadminExpenses,
   type Branch,
+  type BranchCashPosition,
+  type CashDeposit,
+  type CashLedgerRow,
+  type CashPeriodRow,
+  type CashReport,
   type DayEntry,
   type ExpenseCategory,
   type Role,
@@ -343,13 +361,14 @@ export async function getDayEntry(branchId: string, date: string): Promise<DayEn
         const supabase = await createClient();
         const { data, error } = await supabase
           .from("sales_entries")
-          .select("product_id, quantity, unit_price_snapshot")
+          .select("product_id, cash_quantity, online_quantity, unit_price_snapshot")
           .eq("branch_id", branchId)
           .eq("entry_date", date);
         if (error) throw new Error(error.message);
         return (data ?? []).map((row) => ({
           productId: row.product_id,
-          quantity: toNumber(row.quantity),
+          cashQuantity: toNumber(row.cash_quantity),
+          onlineQuantity: toNumber(row.online_quantity),
           unitPriceSnapshot: toNumber(row.unit_price_snapshot),
         }));
       })();
@@ -360,13 +379,14 @@ export async function getDayEntry(branchId: string, date: string): Promise<DayEn
         const supabase = await createClient();
         const { data, error } = await supabase
           .from("expense_entries")
-          .select("category_id, amount")
+          .select("category_id, cash_amount, online_amount")
           .eq("branch_id", branchId)
           .eq("entry_date", date);
         if (error) throw new Error(error.message);
         return (data ?? []).map((row) => ({
           categoryId: row.category_id,
-          amount: toNumber(row.amount),
+          cashAmount: toNumber(row.cash_amount),
+          onlineAmount: toNumber(row.online_amount),
         }));
       })();
 
@@ -374,7 +394,8 @@ export async function getDayEntry(branchId: string, date: string): Promise<DayEn
     salesRows.map((row) => [
       row.productId,
       {
-        quantity: row.quantity,
+        cashQuantity: row.cashQuantity,
+        onlineQuantity: row.onlineQuantity,
         unitPrice: row.unitPriceSnapshot,
       },
     ]),
@@ -389,7 +410,8 @@ export async function getDayEntry(branchId: string, date: string): Promise<DayEn
       .map((product) => ({
         productId: product.id,
         name: product.name,
-        quantity: salesMap.get(product.id)?.quantity ?? 0,
+        cashQuantity: salesMap.get(product.id)?.cashQuantity ?? 0,
+        onlineQuantity: salesMap.get(product.id)?.onlineQuantity ?? 0,
         unitPrice:
           salesMap.get(product.id)?.unitPrice ?? product.price ?? 0,
       })),
@@ -399,24 +421,27 @@ export async function getDayEntry(branchId: string, date: string): Promise<DayEn
           category.isActive ||
           expenseRows.some((row) => row.categoryId === category.id),
       )
-      .map((category) => ({
-        categoryId: category.id,
-        name: category.name,
-        amount:
-          expenseRows.find((row) => row.categoryId === category.id)?.amount ?? 0,
-        isSuperadminOnly: category.isSuperadminOnly,
-      })),
+      .map((category) => {
+        const row = expenseRows.find((item) => item.categoryId === category.id);
+        return {
+          categoryId: category.id,
+          name: category.name,
+          cashAmount: row?.cashAmount ?? 0,
+          onlineAmount: row?.onlineAmount ?? 0,
+          isSuperadminOnly: category.isSuperadminOnly,
+        };
+      }),
     stocks,
     hiddenExpenseTotal: expenseRows
       .filter((row) => !visibleCategoryIds.has(row.categoryId))
-      .reduce((sum, row) => sum + row.amount, 0),
+      .reduce((sum, row) => sum + row.cashAmount + row.onlineAmount, 0),
   };
 }
 
 export async function saveDaySales(
   branchId: string,
   date: string,
-  lines: { productId: string; quantity: number }[],
+  lines: { productId: string; cashQuantity: number; onlineQuantity: number }[],
 ) {
   const user = await requireSession();
   await getBranch(branchId);
@@ -440,12 +465,13 @@ export async function saveDaySales(
     .eq("entry_date", date);
 
   const rows = payload
-    .filter((line) => line.quantity > 0)
+    .filter((line) => line.cashQuantity > 0 || line.onlineQuantity > 0)
     .map((line) => ({
       branch_id: branchId,
       product_id: line.productId,
       entry_date: date,
-      quantity: line.quantity,
+      cash_quantity: line.cashQuantity,
+      online_quantity: line.onlineQuantity,
       unit_price_snapshot: line.unitPrice,
       recorded_by: user.id,
     }));
@@ -458,7 +484,7 @@ export async function saveDaySales(
 export async function saveDayExpenses(
   branchId: string,
   date: string,
-  lines: { categoryId: string; amount: number }[],
+  lines: { categoryId: string; cashAmount: number; onlineAmount: number }[],
 ) {
   const user = await requireSession();
   await getBranch(branchId);
@@ -487,12 +513,13 @@ export async function saveDayExpenses(
   }
 
   const rows = accepted
-    .filter((line) => line.amount > 0)
+    .filter((line) => line.cashAmount > 0 || line.onlineAmount > 0)
     .map((line) => ({
       branch_id: branchId,
       category_id: line.categoryId,
       entry_date: date,
-      amount: line.amount,
+      cash_amount: line.cashAmount,
+      online_amount: line.onlineAmount,
       recorded_by: user.id,
     }));
   if (rows.length) {
@@ -558,7 +585,7 @@ export async function getMonthReport(branchId: string, month: string) {
     await Promise.all([
       supabase
         .from("sales_entries")
-        .select("entry_date, quantity, unit_price_snapshot")
+        .select("entry_date, cash_quantity, online_quantity, unit_price_snapshot")
         .eq("branch_id", branchId)
         .gte("entry_date", start)
         .lt("entry_date", endExclusive),
@@ -573,12 +600,20 @@ export async function getMonthReport(branchId: string, month: string) {
   if (expensesError) throw new Error(expensesError.message);
 
   const days = status.map((day) => {
-    const salesTotal = (sales ?? [])
-      .filter((row) => entryDateKey(row.entry_date) === day.date)
-      .reduce(
-        (sum, row) => sum + toNumber(row.quantity) * toNumber(row.unit_price_snapshot),
-        0,
-      );
+    const daySales = (sales ?? []).filter(
+      (row) => entryDateKey(row.entry_date) === day.date,
+    );
+    const cashTotal = daySales.reduce(
+      (sum, row) =>
+        sum + toNumber(row.cash_quantity) * toNumber(row.unit_price_snapshot),
+      0,
+    );
+    const onlineTotal = daySales.reduce(
+      (sum, row) =>
+        sum + toNumber(row.online_quantity) * toNumber(row.unit_price_snapshot),
+      0,
+    );
+    const salesTotal = cashTotal + onlineTotal;
     const dayExpenses = (expenses ?? []).filter(
       (row) => entryDateKey(row.entry_date) === day.date,
     );
@@ -589,6 +624,8 @@ export async function getMonthReport(branchId: string, month: string) {
     return {
       date: day.date,
       salesTotal,
+      cashTotal,
+      onlineTotal,
       expenseTotal,
       refillTotal: showRefill
         ? dayExpenses
@@ -605,6 +642,8 @@ export async function getMonthReport(branchId: string, month: string) {
   return {
     month,
     salesTotal,
+    cashTotal: days.reduce((sum, day) => sum + day.cashTotal, 0),
+    onlineTotal: days.reduce((sum, day) => sum + day.onlineTotal, 0),
     expenseTotal,
     refillTotal: showRefill
       ? days.reduce((sum, day) => sum + (day.refillTotal ?? 0), 0)
@@ -612,6 +651,219 @@ export async function getMonthReport(branchId: string, month: string) {
     net: salesTotal - expenseTotal,
     days,
   };
+}
+
+// Deposits are recorded by whoever walked the cash to the bank, so these stay on
+// getBranch rather than requireAdminBranch: a staff account may read and write
+// its own branch's log.
+export async function listDeposits(
+  branchId: string,
+  month?: string,
+): Promise<CashDeposit[]> {
+  await getBranch(branchId);
+  if (isDemoMode()) return demoListDeposits(branchId, month);
+
+  const supabase = await createClient();
+  let query = supabase
+    .from("cash_deposits")
+    .select(
+      "id, branch_id, deposit_date, amount, reference, note, recorded_by_name, updated_by_name",
+    )
+    .eq("branch_id", branchId)
+    .order("deposit_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (month) {
+    const { start, endExclusive } = monthDateRange(month);
+    query = query.gte("deposit_date", start).lt("deposit_date", endExclusive);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    branchId: row.branch_id,
+    depositDate: entryDateKey(row.deposit_date),
+    amount: toNumber(row.amount),
+    reference: row.reference,
+    note: row.note,
+    recordedByName: row.recorded_by_name,
+    updatedByName: row.updated_by_name,
+  }));
+}
+
+export async function upsertDeposit(input: {
+  branchId: string;
+  id?: string;
+  depositDate: string;
+  amount: number;
+  reference: string | null;
+  note: string | null;
+}) {
+  const user = await requireSession();
+  await getBranch(input.branchId);
+  const recordedByName = user.fullName || user.email;
+
+  if (isDemoMode()) {
+    await demoUpsertDeposit({ ...input, recordedByName });
+    return;
+  }
+
+  const supabase = await createClient();
+  if (input.id) {
+    const { error } = await supabase
+      .from("cash_deposits")
+      .update({
+        deposit_date: input.depositDate,
+        amount: input.amount,
+        reference: input.reference,
+        note: input.note,
+        updated_by: user.id,
+        updated_by_name: recordedByName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.id)
+      .eq("branch_id", input.branchId);
+    if (error) throw new Error(depositErrorMessage(error));
+    return;
+  }
+  const { error } = await supabase.from("cash_deposits").insert({
+    branch_id: input.branchId,
+    deposit_date: input.depositDate,
+    amount: input.amount,
+    reference: input.reference,
+    note: input.note,
+    recorded_by: user.id,
+    recorded_by_name: recordedByName,
+  });
+  if (error) throw new Error(depositErrorMessage(error));
+}
+
+// The reference is unique per branch, and entering the same slip twice is the
+// likeliest mistake, so that collision gets said in plain words.
+function depositErrorMessage(error: { code?: string; message: string }) {
+  if (error.code === "23505") return "That deposit reference is already logged.";
+  return error.message;
+}
+
+export async function deleteDeposit(branchId: string, id: string) {
+  await getBranch(branchId);
+  if (isDemoMode()) {
+    await demoDeleteDeposit(branchId, id);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("cash_deposits")
+    .delete()
+    .eq("id", id)
+    .eq("branch_id", branchId);
+  if (error) throw new Error(error.message);
+}
+
+// All-time cash position, which is what says whether the deposits keep up with
+// the cash coming in. Leaving branchId off returns every branch the viewer may
+// read, for the owner's cross-branch rollup.
+export async function getBranchCashPositions(
+  branchId?: string,
+  through = manilaToday(),
+): Promise<BranchCashPosition[]> {
+  const user = await requireSession();
+  if (branchId) await getBranch(branchId);
+  if (isDemoMode()) return demoCashPositions(user, through, branchId);
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("cash_position", {
+    p_through: through,
+    p_branch_id: branchId ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    branchId: row.branch_id,
+    cashSales: toNumber(row.cash_sales),
+    cashExpenses: toNumber(row.cash_expenses),
+    deposited: toNumber(row.deposited),
+    onHand: toNumber(row.on_hand),
+    lastDepositDate: row.last_deposit_date
+      ? entryDateKey(row.last_deposit_date)
+      : null,
+    lastDepositAmount:
+      row.last_deposit_amount === null ? null : toNumber(row.last_deposit_amount),
+  }));
+}
+
+export async function getCashReport(
+  branchId: string,
+  month: string,
+): Promise<CashReport> {
+  await getBranch(branchId);
+  const { start } = monthDateRange(month);
+  const end = monthEndKey(month);
+
+  const [days, deposits, position] = await Promise.all([
+    isDemoMode()
+      ? demoCashLedger(branchId, start, end)
+      : (async () => {
+          const supabase = await createClient();
+          const { data, error } = await supabase.rpc("cash_day_state", {
+            p_branch_id: branchId,
+            p_start: start,
+            p_end: end,
+          });
+          if (error) throw new Error(error.message);
+          return (data ?? []).map((row) => ({
+            date: entryDateKey(row.entry_date),
+            cashSales: toNumber(row.cash_sales),
+            cashExpenses: toNumber(row.cash_expenses),
+            deposited: toNumber(row.deposited),
+            onHand: toNumber(row.on_hand),
+          }));
+        })(),
+    listDeposits(branchId, month),
+    // The balance carried into the month, taken as of the day before it starts
+    // so a month with no records still reports the cash left over from before.
+    getBranchCashPositions(branchId, previousDateKey(start)),
+  ]);
+
+  const opening = position[0]?.onHand ?? 0;
+  return {
+    month,
+    opening,
+    cashSales: days.reduce((sum, day) => sum + day.cashSales, 0),
+    cashExpenses: days.reduce((sum, day) => sum + day.cashExpenses, 0),
+    deposited: days.reduce((sum, day) => sum + day.deposited, 0),
+    closing: days.at(-1)?.onHand ?? opening,
+    days,
+    weeks: toCashWeeks(days, opening),
+    deposits,
+  };
+}
+
+// Days arrive in date order, so a week ends as soon as the next day lands in a
+// different one, and each week opens on the balance the last one closed with.
+function toCashWeeks(days: CashLedgerRow[], opening: number): CashPeriodRow[] {
+  const weeks: CashPeriodRow[] = [];
+  let running = opening;
+  for (const day of days) {
+    const key = weekStartKey(day.date);
+    let week = weeks.at(-1);
+    if (!week || week.key !== key) {
+      week = {
+        key,
+        label: formatWeekLabel(key),
+        opening: running,
+        cashSales: 0,
+        cashExpenses: 0,
+        deposited: 0,
+        closing: running,
+      };
+      weeks.push(week);
+    }
+    week.cashSales += day.cashSales;
+    week.cashExpenses += day.cashExpenses;
+    week.deposited += day.deposited;
+    week.closing = day.onHand;
+    running = day.onHand;
+  }
+  return weeks;
 }
 
 export async function upsertProduct(input: {

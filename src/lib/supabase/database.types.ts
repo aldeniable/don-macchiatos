@@ -48,6 +48,9 @@ type Row = {
     branch_id: string;
     product_id: string;
     entry_date: string;
+    cash_quantity: number;
+    online_quantity: number;
+    // Generated in Postgres as cash_quantity + online_quantity.
     quantity: number;
     unit_price_snapshot: number;
     recorded_by: string | null;
@@ -58,8 +61,25 @@ type Row = {
     branch_id: string;
     category_id: string;
     entry_date: string;
+    cash_amount: number;
+    online_amount: number;
+    // Generated in Postgres as cash_amount + online_amount.
     amount: number;
     recorded_by: string | null;
+    updated_at: string;
+  };
+  cash_deposits: {
+    id: string;
+    branch_id: string;
+    deposit_date: string;
+    amount: number;
+    reference: string | null;
+    note: string | null;
+    recorded_by: string | null;
+    recorded_by_name: string;
+    updated_by: string | null;
+    updated_by_name: string;
+    created_at: string;
     updated_at: string;
   };
   stock_items: {
@@ -138,6 +158,7 @@ type Relationships = {
   ];
   sales_entries: [];
   expense_entries: [];
+  cash_deposits: [];
   stock_items: [
     {
       foreignKeyName: "stock_items_business_id_fkey";
@@ -180,6 +201,28 @@ export type Database = {
           added_quantity: number;
           used_quantity: number;
           closing_quantity: number;
+        }[];
+      };
+      cash_day_state: {
+        Args: { p_branch_id: string; p_start: string; p_end: string };
+        Returns: {
+          entry_date: string;
+          cash_sales: number;
+          cash_expenses: number;
+          deposited: number;
+          on_hand: number;
+        }[];
+      };
+      cash_position: {
+        Args: { p_through: string; p_branch_id?: string | null };
+        Returns: {
+          branch_id: string;
+          cash_sales: number;
+          cash_expenses: number;
+          deposited: number;
+          on_hand: number;
+          last_deposit_date: string | null;
+          last_deposit_amount: number | null;
         }[];
       };
     };

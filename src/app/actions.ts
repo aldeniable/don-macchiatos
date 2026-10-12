@@ -6,6 +6,7 @@ import { z } from "zod";
 import { isFutureDate } from "@/lib/dates";
 import {
   createStaff,
+  deleteDeposit,
   getSession,
   homePathFor,
   saveDayExpenses,
@@ -14,6 +15,7 @@ import {
   setBranchPrice,
   signIn,
   signOut,
+  upsertDeposit,
   upsertExpenseCategory,
   upsertProduct,
   upsertStockItem,
@@ -55,18 +57,24 @@ export async function saveSalesAction(formData: FormData) {
     throw new Error("Invalid date.");
   }
   const productIds = formData.getAll("productId").map(String);
-  const quantities = formData.getAll("quantity").map((value) => Number(value) || 0);
+  const cash = formData.getAll("cashQuantity").map((value) => Number(value) || 0);
+  const online = formData.getAll("onlineQuantity").map((value) => Number(value) || 0);
   await saveDaySales(
     branchId,
     date,
     productIds.map((productId, index) => ({
       productId,
-      quantity: quantities[index] ?? 0,
+      cashQuantity: Math.max(0, cash[index] ?? 0),
+      onlineQuantity: Math.max(0, online[index] ?? 0),
     })),
   );
   revalidatePath(`/b/${branchId}`);
   revalidatePath(`/b/${branchId}/day/${date}`);
   revalidatePath(`/b/${branchId}/reports`);
+  // Cash sales are what the branch owes the bank, so the deposit ledger moves
+  // with them.
+  revalidatePath(`/b/${branchId}/deposits`);
+  revalidatePath("/select");
 }
 
 export async function saveExpensesAction(formData: FormData) {
@@ -76,18 +84,23 @@ export async function saveExpensesAction(formData: FormData) {
     throw new Error("Invalid date.");
   }
   const categoryIds = formData.getAll("categoryId").map(String);
-  const amounts = formData.getAll("amount").map((value) => Number(value) || 0);
+  const cash = formData.getAll("cashAmount").map((value) => Number(value) || 0);
+  const online = formData.getAll("onlineAmount").map((value) => Number(value) || 0);
   await saveDayExpenses(
     branchId,
     date,
     categoryIds.map((categoryId, index) => ({
       categoryId,
-      amount: amounts[index] ?? 0,
+      cashAmount: Math.max(0, cash[index] ?? 0),
+      onlineAmount: Math.max(0, online[index] ?? 0),
     })),
   );
   revalidatePath(`/b/${branchId}`);
   revalidatePath(`/b/${branchId}/day/${date}`);
   revalidatePath(`/b/${branchId}/reports`);
+  // Cash spent from the drawer changes what the branch still owes the bank.
+  revalidatePath(`/b/${branchId}/deposits`);
+  revalidatePath("/select");
 }
 
 export async function saveStocksAction(formData: FormData) {
@@ -111,6 +124,40 @@ export async function saveStocksAction(formData: FormData) {
   revalidatePath(`/b/${branchId}`);
   revalidatePath(`/b/${branchId}/day/${date}`);
   revalidatePath(`/b/${branchId}/stocks`);
+}
+
+export async function saveDepositAction(formData: FormData) {
+  const branchId = String(formData.get("branchId") ?? "");
+  const depositDate = String(formData.get("depositDate") ?? "");
+  if (!branchId || !depositDate || isFutureDate(depositDate)) {
+    throw new Error("Invalid date.");
+  }
+  const amount = Number(formData.get("amount")) || 0;
+  if (amount <= 0) throw new Error("Enter the amount deposited.");
+  await upsertDeposit({
+    branchId,
+    id: String(formData.get("id") ?? "") || undefined,
+    depositDate,
+    amount,
+    reference: String(formData.get("reference") ?? "").trim() || null,
+    note: String(formData.get("note") ?? "").trim() || null,
+  });
+  revalidateDeposits(branchId);
+}
+
+export async function deleteDepositAction(formData: FormData) {
+  const branchId = String(formData.get("branchId") ?? "");
+  const id = String(formData.get("id") ?? "");
+  if (!branchId || !id) throw new Error("Deposit not found.");
+  await deleteDeposit(branchId, id);
+  revalidateDeposits(branchId);
+}
+
+function revalidateDeposits(branchId: string) {
+  revalidatePath(`/b/${branchId}`);
+  revalidatePath(`/b/${branchId}/deposits`);
+  revalidatePath(`/b/${branchId}/reports`);
+  revalidatePath("/select");
 }
 
 export async function saveStockItemAction(formData: FormData) {
