@@ -7,6 +7,7 @@ import {
   requireSession,
 } from "@/lib/data";
 import { pesos } from "@/lib/money";
+import { canManagePayroll } from "@/lib/types";
 
 export default async function SelectPage() {
   const user = await requireSession();
@@ -55,6 +56,17 @@ export default async function SelectPage() {
             </section>
           );
         })}
+        {canManagePayroll(user) ? (
+          <Link
+            href="/payroll"
+            className="flex min-h-14 items-center justify-between gap-3 rounded-xl bg-card px-4 text-base font-medium ring-1 ring-foreground/10"
+          >
+            Payroll
+            <span className="text-[11px] font-normal text-muted-foreground">
+              hours and salary
+            </span>
+          </Link>
+        ) : null}
       </div>
     </AppShell>
   );

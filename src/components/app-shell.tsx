@@ -7,6 +7,7 @@ import {
   Boxes,
   CalendarDays,
   ChartColumn,
+  Clock,
   Landmark,
   LogOut,
   Package,
@@ -66,7 +67,10 @@ export function AppShell({
           : []),
       ]
     : canManageStaff(user)
-      ? [{ href: "/staff", label: "Staff", icon: Users }]
+      ? [
+          { href: "/payroll", label: "Payroll", icon: Clock },
+          { href: "/staff", label: "Staff", icon: Users },
+        ]
       : [];
 
   return (

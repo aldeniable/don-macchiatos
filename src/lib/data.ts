@@ -5,6 +5,8 @@ import {
   DEMO_COOKIE,
   demoCashLedger,
   demoCashPositions,
+  demoClockIn,
+  demoClockOut,
   demoCreateStaff,
   demoDayExpenses,
   demoDaySales,
@@ -12,20 +14,32 @@ import {
   demoDeleteDeposit,
   demoExpenseCategories,
   demoGetBranch,
+  demoGetPaySettings,
   demoGetUser,
+  demoListBranchEmployees,
   demoListBranches,
   demoListBusinesses,
   demoListDeposits,
+  demoListPayTiers,
+  demoListShifts,
   demoListStaff,
   demoMonthReport,
   demoMonthStatus,
+  demoPendingShiftBranches,
   demoProducts,
+  demoReadPhoto,
+  demoReviewShift,
   demoSaveExpenses,
+  demoSavePhoto,
   demoSaveSales,
   demoSaveStocks,
+  demoSetBranchShiftHours,
+  demoSetEmployeeTier,
+  demoSetPaySettings,
   demoSetPrice,
   demoSignIn,
   demoStockItems,
+  demoUpdatePayTier,
   demoUpsertDeposit,
   demoUpsertExpenseCategory,
   demoUpsertProduct,
@@ -43,22 +57,32 @@ import {
   weekStartKey,
 } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
+import { summarizePeriod } from "@/lib/payroll";
 import {
   canAdminBranch,
+  canClock,
   canEnterBranch,
   canManageCatalog,
+  canManagePayroll,
   canManageStaff,
   canSeeSuperadminExpenses,
   type Branch,
   type BranchCashPosition,
+  type BranchEmployee,
   type CashDeposit,
   type CashLedgerRow,
   type CashPeriodRow,
   type CashReport,
   type DayEntry,
   type ExpenseCategory,
+  type PayrollReport,
+  type PaySettings,
+  type PayTier,
   type Role,
   type SessionUser,
+  type Shift,
+  type ShiftRecord,
+  type ShiftStatus,
   type StockItem,
   type StockLine,
 } from "@/lib/types";
@@ -145,7 +169,7 @@ export async function listBranches(businessId?: string) {
   const supabase = await createClient();
   let query = supabase
     .from("branches")
-    .select("id, business_id, name, businesses(name)")
+    .select("id, business_id, name, standard_shift_hours, businesses(name)")
     .order("name");
   if (businessId) query = query.eq("business_id", businessId);
   const { data, error } = await query;
@@ -154,6 +178,7 @@ export async function listBranches(businessId?: string) {
     id: row.id,
     businessId: row.business_id,
     name: row.name,
+    standardShiftHours: toNumber(row.standard_shift_hours),
     businessName:
       (row.businesses as { name: string } | { name: string }[] | null) &&
       !Array.isArray(row.businesses)
@@ -172,7 +197,7 @@ export async function getBranch(branchId: string): Promise<Branch> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("branches")
-    .select("id, business_id, name, businesses(name)")
+    .select("id, business_id, name, standard_shift_hours, businesses(name)")
     .eq("id", branchId)
     .maybeSingle();
   if (error || !data) throw new Error("Branch not found.");
@@ -181,6 +206,7 @@ export async function getBranch(branchId: string): Promise<Branch> {
     id: data.id,
     businessId: data.business_id,
     name: data.name,
+    standardShiftHours: toNumber(data.standard_shift_hours),
     businessName: Array.isArray(business)
       ? (business[0]?.name ?? "")
       : (business?.name ?? ""),
@@ -1022,7 +1048,7 @@ export async function listStaff() {
   const admin = createAdminClient();
   const { data: profiles, error } = await admin
     .from("profiles")
-    .select("id, role, branch_id, full_name, branches(name, businesses(name))")
+    .select("id, role, branch_id, full_name, pay_tier_id, branches(name, businesses(name))")
     .order("full_name");
   if (error) throw new Error(error.message);
 
@@ -1046,6 +1072,7 @@ export async function listStaff() {
       businessName: Array.isArray(business)
         ? (business[0]?.name ?? null)
         : (business?.name ?? null),
+      payTierId: profile.pay_tier_id,
     };
   });
 }
@@ -1056,6 +1083,7 @@ export async function createStaff(input: {
   fullName: string;
   role: Role;
   branchId: string | null;
+  payTierId: string | null;
 }) {
   const user = await requireSession();
   if (!canManageStaff(user)) redirect("/select");
@@ -1079,8 +1107,567 @@ export async function createStaff(input: {
     full_name: input.fullName,
     role: input.role,
     branch_id: input.role === "superadmin" ? null : input.branchId,
+    pay_tier_id: input.role === "superadmin" ? null : input.payTierId,
   });
   if (profileError) throw new Error(profileError.message);
+}
+
+// ---------------------------------------------------------------------------
+// Attendance and payroll
+// ---------------------------------------------------------------------------
+
+export async function listPayTiers(): Promise<PayTier[]> {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (isDemoMode()) return demoListPayTiers();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("pay_tiers")
+    .select("id, name, daily_rate, sort_order")
+    .order("sort_order");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    dailyRate: toNumber(row.daily_rate),
+    sortOrder: row.sort_order,
+  }));
+}
+
+export async function getPaySettings(): Promise<PaySettings> {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (isDemoMode()) return demoGetPaySettings();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("pay_settings")
+    .select("overtime_hourly_rate")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return { overtimeHourlyRate: toNumber(data?.overtime_hourly_rate ?? 50) };
+}
+
+export async function updatePayTier(input: {
+  id: string;
+  name: string;
+  dailyRate: number;
+}) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (isDemoMode()) {
+    await demoUpdatePayTier(input);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("pay_tiers")
+    .update({ name: input.name, daily_rate: input.dailyRate })
+    .eq("id", input.id);
+  if (error) throw new Error(error.message);
+}
+
+export async function setPaySettings(overtimeHourlyRate: number) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (isDemoMode()) {
+    await demoSetPaySettings(overtimeHourlyRate);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("pay_settings").update({
+    overtime_hourly_rate: overtimeHourlyRate,
+    updated_at: new Date().toISOString(),
+  }).eq("id", true);
+  if (error) throw new Error(error.message);
+}
+
+export async function setBranchShiftHours(branchId: string, hours: number) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (isDemoMode()) {
+    await demoSetBranchShiftHours(branchId, hours);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("branches")
+    .update({ standard_shift_hours: hours })
+    .eq("id", branchId);
+  if (error) throw new Error(error.message);
+}
+
+export async function setEmployeeTier(profileId: string, payTierId: string | null) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (isDemoMode()) {
+    await demoSetEmployeeTier(profileId, payTierId);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ pay_tier_id: payTierId })
+    .eq("id", profileId);
+  if (error) throw new Error(error.message);
+}
+
+export async function listBranchEmployees(
+  branchId: string,
+): Promise<BranchEmployee[]> {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (isDemoMode()) return demoListBranchEmployees(branchId);
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, pay_tier_id")
+    .eq("branch_id", branchId)
+    .order("full_name");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    fullName: row.full_name,
+    role: row.role,
+    payTierId: row.pay_tier_id,
+  }));
+}
+
+// Shifts the owner has not dealt with yet, per branch, for the badge on the
+// payroll branch picker.
+export async function countPendingShifts(): Promise<Map<string, number>> {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  const rows = isDemoMode()
+    ? await demoPendingShiftBranches()
+    : await (async () => {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from("shifts")
+          .select("branch_id")
+          .in("status", ["open", "pending"]);
+        if (error) throw new Error(error.message);
+        return (data ?? []).map((row) => row.branch_id);
+      })();
+
+  const counts = new Map<string, number>();
+  for (const branchId of rows) {
+    counts.set(branchId, (counts.get(branchId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// The pay rules a shift is read by. An approved shift answers from its own
+// snapshot; anything earlier than that is priced at today's rules, which is
+// what the owner is shown before approving.
+async function payContext(branchId: string) {
+  const [branch, tiers, settings, employees] = await Promise.all([
+    getBranch(branchId),
+    listPayTiers(),
+    getPaySettings(),
+    listBranchEmployees(branchId),
+  ]);
+  const tierById = new Map(tiers.map((tier) => [tier.id, tier]));
+  const tierForProfile = new Map(
+    employees.map((employee) => [
+      employee.id,
+      employee.payTierId ? tierById.get(employee.payTierId) ?? null : null,
+    ]),
+  );
+  const nameForProfile = new Map(
+    employees.map((employee) => [employee.id, employee.fullName]),
+  );
+  return {
+    branch,
+    settings,
+    tierForProfile,
+    nameForProfile,
+    standardMinutes: Math.round(branch.standardShiftHours * 60),
+  };
+}
+
+type PayContext = Awaited<ReturnType<typeof payContext>>;
+
+function toShift(
+  record: ShiftRecord,
+  context: PayContext,
+  photos: { in: string | null; out: string | null },
+): Shift {
+  const tier = context.tierForProfile.get(record.profileId) ?? null;
+  const approved = record.status === "approved";
+  return {
+    id: record.id,
+    profileId: record.profileId,
+    employeeName: context.nameForProfile.get(record.profileId) ?? "Unknown",
+    branchId: record.branchId,
+    workDate: record.workDate,
+    timeIn: record.timeIn,
+    timeOut: record.timeOut,
+    approvedIn: record.approvedIn,
+    approvedOut: record.approvedOut,
+    status: record.status,
+    photoInUrl: photos.in,
+    photoOutUrl: photos.out,
+    note: record.note,
+    dailyRate: approved ? record.dailyRateSnapshot : (tier?.dailyRate ?? null),
+    overtimeRate: approved
+      ? (record.overtimeRateSnapshot ?? context.settings.overtimeHourlyRate)
+      : context.settings.overtimeHourlyRate,
+    standardMinutes: approved
+      ? (record.standardMinutesSnapshot ?? context.standardMinutes)
+      : context.standardMinutes,
+  };
+}
+
+async function listShiftRecords(filter: {
+  branchId?: string;
+  profileId?: string;
+  start?: string;
+  end?: string;
+}): Promise<ShiftRecord[]> {
+  if (isDemoMode()) return demoListShifts(filter);
+
+  const supabase = await createClient();
+  let query = supabase
+    .from("shifts")
+    .select(
+      "id, profile_id, branch_id, work_date, time_in, time_out, photo_in_path, photo_out_path, status, approved_in, approved_out, daily_rate_snapshot, overtime_rate_snapshot, standard_minutes_snapshot, note",
+    )
+    .order("work_date", { ascending: false });
+  if (filter.branchId) query = query.eq("branch_id", filter.branchId);
+  if (filter.profileId) query = query.eq("profile_id", filter.profileId);
+  if (filter.start) query = query.gte("work_date", filter.start);
+  if (filter.end) query = query.lte("work_date", filter.end);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    profileId: row.profile_id,
+    branchId: row.branch_id,
+    workDate: entryDateKey(row.work_date),
+    timeIn: row.time_in,
+    timeOut: row.time_out,
+    photoInPath: row.photo_in_path,
+    photoOutPath: row.photo_out_path,
+    status: row.status,
+    approvedIn: row.approved_in,
+    approvedOut: row.approved_out,
+    dailyRateSnapshot:
+      row.daily_rate_snapshot === null ? null : toNumber(row.daily_rate_snapshot),
+    overtimeRateSnapshot:
+      row.overtime_rate_snapshot === null
+        ? null
+        : toNumber(row.overtime_rate_snapshot),
+    standardMinutesSnapshot: row.standard_minutes_snapshot,
+    note: row.note,
+  }));
+}
+
+// Photos live in a private bucket, so a readable link has to be minted per
+// render and expires on its own. Demo mode has no bucket, so the paths point at
+// the superadmin-only route that streams the file off disk.
+async function signShiftPhotos(records: ShiftRecord[]) {
+  const urls = new Map<string, string | null>();
+  if (isDemoMode()) {
+    for (const record of records) {
+      if (record.photoInPath) urls.set(record.photoInPath, `/payroll/photo/${record.id}/in`);
+      if (record.photoOutPath) urls.set(record.photoOutPath, `/payroll/photo/${record.id}/out`);
+    }
+    return urls;
+  }
+
+  const paths = records
+    .flatMap((record) => [record.photoInPath, record.photoOutPath])
+    .filter((path): path is string => Boolean(path));
+  if (!paths.length) return urls;
+
+  const admin = createAdminClient();
+  const { data } = await admin.storage
+    .from(ATTENDANCE_BUCKET)
+    .createSignedUrls(paths, 60 * 10);
+  for (const row of data ?? []) {
+    if (row.path) urls.set(row.path, row.signedUrl ?? null);
+  }
+  return urls;
+}
+
+export async function listBranchShifts(
+  branchId: string,
+  start: string,
+  end: string,
+): Promise<Shift[]> {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  const context = await payContext(branchId);
+  const records = await listShiftRecords({ branchId, start, end });
+  const urls = await signShiftPhotos(records);
+  return records
+    .map((record) =>
+      toShift(record, context, {
+        in: record.photoInPath ? (urls.get(record.photoInPath) ?? null) : null,
+        out: record.photoOutPath ? (urls.get(record.photoOutPath) ?? null) : null,
+      }),
+    )
+    .sort((a, b) =>
+      a.workDate === b.workDate
+        ? a.employeeName.localeCompare(b.employeeName)
+        : a.workDate < b.workDate
+          ? 1
+          : -1,
+    );
+}
+
+export async function getBranchPayroll(
+  branchId: string,
+  start: string,
+  end: string,
+): Promise<PayrollReport> {
+  const shifts = await listBranchShifts(branchId, start, end);
+  const employees = await listBranchEmployees(branchId);
+  const tiers = await listPayTiers();
+  const tierById = new Map(tiers.map((tier) => [tier.id, tier.name]));
+  const tierNames = new Map(
+    employees.map((employee) => [
+      employee.id,
+      employee.payTierId ? (tierById.get(employee.payTierId) ?? null) : null,
+    ]),
+  );
+  return summarizePeriod(shifts, tierNames);
+}
+
+// An employee's own recent shifts. Hours and status only: the pay side of a
+// shift is the owner's view, not theirs.
+export async function listMyShifts(since: string): Promise<Shift[]> {
+  const user = await requireSession();
+  if (!canClock(user) || !user.branchId) return [];
+  const records = await listShiftRecords({
+    profileId: user.id,
+    start: since,
+  });
+  return records.map((record) => ({
+    id: record.id,
+    profileId: record.profileId,
+    employeeName: user.fullName || user.email,
+    branchId: record.branchId,
+    workDate: record.workDate,
+    timeIn: record.timeIn,
+    timeOut: record.timeOut,
+    approvedIn: record.approvedIn,
+    approvedOut: record.approvedOut,
+    status: record.status,
+    photoInUrl: null,
+    photoOutUrl: null,
+    note: record.note,
+    dailyRate: null,
+    overtimeRate: 0,
+    standardMinutes: record.standardMinutesSnapshot ?? 0,
+  }));
+}
+
+const ATTENDANCE_BUCKET = "attendance";
+
+// The photo is uploaded first and the shift row written second, so a failed
+// upload never leaves a shift with no evidence behind it.
+async function uploadShiftPhoto(userId: string, kind: "in" | "out", photo: Blob) {
+  const name = `${userId}/${Date.now()}-${kind}.jpg`;
+  if (isDemoMode()) return demoSavePhoto(name, await photo.arrayBuffer());
+
+  const admin = createAdminClient();
+  const { error } = await admin.storage
+    .from(ATTENDANCE_BUCKET)
+    .upload(name, await photo.arrayBuffer(), { contentType: "image/jpeg" });
+  if (error) throw new Error(error.message);
+  return name;
+}
+
+export async function clockIn(photo: Blob) {
+  const user = await requireSession();
+  if (!canClock(user)) throw new Error("This account does not time in.");
+  const path = await uploadShiftPhoto(user.id, "in", photo);
+  if (isDemoMode()) {
+    await demoClockIn(user.id, path);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("clock_in", { p_photo_path: path });
+  if (error) throw new Error(error.message);
+}
+
+export async function clockOut(photo: Blob) {
+  const user = await requireSession();
+  if (!canClock(user)) throw new Error("This account does not time in.");
+  const path = await uploadShiftPhoto(user.id, "out", photo);
+  if (isDemoMode()) {
+    await demoClockOut(user.id, path);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("clock_out", { p_photo_path: path });
+  if (error) throw new Error(error.message);
+}
+
+// Approving freezes the pay rules onto the row, so a later rate change never
+// rewrites what has already been signed off.
+export async function approveShifts(
+  branchId: string,
+  shiftIds: string[],
+  times?: { approvedIn: string | null; approvedOut: string | null },
+) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  if (!shiftIds.length) return;
+  const context = await payContext(branchId);
+  const records = (await listShiftRecords({ branchId })).filter((record) =>
+    shiftIds.includes(record.id),
+  );
+
+  for (const record of records) {
+    const tier = context.tierForProfile.get(record.profileId) ?? null;
+    if (!tier) {
+      throw new Error(
+        `${context.nameForProfile.get(record.profileId) ?? "This employee"} has no pay rate yet. Set one in Configure first.`,
+      );
+    }
+    const approvedIn = times?.approvedIn ?? record.approvedIn;
+    const approvedOut = times?.approvedOut ?? record.approvedOut;
+    const timeOut = approvedOut ?? record.timeOut;
+    if (!timeOut) {
+      throw new Error(
+        "This shift has no time out yet. Set the time it ended before approving.",
+      );
+    }
+    await writeShiftReview(record.id, branchId, {
+      status: "approved",
+      approvedIn,
+      approvedOut,
+      dailyRateSnapshot: tier.dailyRate,
+      overtimeRateSnapshot: context.settings.overtimeHourlyRate,
+      standardMinutesSnapshot: context.standardMinutes,
+      note: null,
+      reviewedBy: user.id,
+    });
+  }
+}
+
+export async function rejectShift(
+  branchId: string,
+  shiftId: string,
+  note: string | null,
+) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  await writeShiftReview(shiftId, branchId, {
+    status: "rejected",
+    approvedIn: null,
+    approvedOut: null,
+    dailyRateSnapshot: null,
+    overtimeRateSnapshot: null,
+    standardMinutesSnapshot: null,
+    note,
+    reviewedBy: user.id,
+  });
+}
+
+// Putting an approved or rejected shift back in the queue, for when the owner
+// changes their mind or corrects a rate and wants it priced again.
+export async function reopenShift(branchId: string, shiftId: string) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  const record = (await listShiftRecords({ branchId })).find(
+    (item) => item.id === shiftId,
+  );
+  if (!record) throw new Error("Shift not found.");
+  await writeShiftReview(shiftId, branchId, {
+    status: record.timeOut || record.approvedOut ? "pending" : "open",
+    approvedIn: record.approvedIn,
+    approvedOut: record.approvedOut,
+    dailyRateSnapshot: null,
+    overtimeRateSnapshot: null,
+    standardMinutesSnapshot: null,
+    note: record.note,
+    reviewedBy: user.id,
+  });
+}
+
+// Correcting the times without deciding on the shift, for the one somebody
+// forgot to time out of: the owner fills in when it ended, then approves.
+export async function adjustShiftTimes(
+  branchId: string,
+  shiftId: string,
+  times: { approvedIn: string | null; approvedOut: string | null },
+) {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) redirect("/select");
+  const record = (await listShiftRecords({ branchId })).find(
+    (item) => item.id === shiftId,
+  );
+  if (!record) throw new Error("Shift not found.");
+  const start = times.approvedIn ?? record.timeIn;
+  const finish = times.approvedOut ?? record.timeOut;
+  if (finish && finish <= start) {
+    throw new Error("The time out has to come after the time in.");
+  }
+  await writeShiftReview(shiftId, branchId, {
+    // Filling in a missing end turns an abandoned shift into one that can be
+    // reviewed, which is the whole point of the correction.
+    status: finish ? "pending" : record.status,
+    approvedIn: times.approvedIn,
+    approvedOut: times.approvedOut,
+    dailyRateSnapshot: null,
+    overtimeRateSnapshot: null,
+    standardMinutesSnapshot: null,
+    note: record.note,
+    reviewedBy: user.id,
+  });
+}
+
+async function writeShiftReview(
+  shiftId: string,
+  branchId: string,
+  input: {
+    status: ShiftStatus;
+    approvedIn: string | null;
+    approvedOut: string | null;
+    dailyRateSnapshot: number | null;
+    overtimeRateSnapshot: number | null;
+    standardMinutesSnapshot: number | null;
+    note: string | null;
+    reviewedBy: string;
+  },
+) {
+  if (isDemoMode()) {
+    await demoReviewShift(shiftId, branchId, input);
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      status: input.status,
+      approved_in: input.approvedIn,
+      approved_out: input.approvedOut,
+      daily_rate_snapshot: input.dailyRateSnapshot,
+      overtime_rate_snapshot: input.overtimeRateSnapshot,
+      standard_minutes_snapshot: input.standardMinutesSnapshot,
+      note: input.note,
+      reviewed_by: input.reviewedBy,
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", shiftId)
+    .eq("branch_id", branchId);
+  if (error) throw new Error(error.message);
+}
+
+// The bytes behind a shift photo, for the demo-mode photo route. Live mode
+// serves photos through signed URLs instead, so this never runs there.
+export async function readShiftPhoto(shiftId: string, kind: "in" | "out") {
+  const user = await requireSession();
+  if (!canManagePayroll(user)) return null;
+  if (!isDemoMode()) return null;
+  return demoReadPhoto(shiftId, kind);
 }
 
 export async function homePathFor(user: SessionUser) {

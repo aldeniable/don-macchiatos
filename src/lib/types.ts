@@ -19,6 +19,9 @@ export type Branch = {
   businessId: string;
   name: string;
   businessName: string;
+  // Hours a full shift runs, lunch included. Everything past it is overtime.
+  // Eight almost everywhere, nine at Catarman.
+  standardShiftHours: number;
 };
 
 export type Product = {
@@ -189,6 +192,118 @@ export type StaffMember = {
   branchId: string | null;
   branchName: string | null;
   businessName: string | null;
+  payTierId: string | null;
+};
+
+export type ShiftStatus = "open" | "pending" | "approved" | "rejected";
+
+// A salary band. `dailyRate` covers one full standard shift however long that
+// branch's standard is, so the same tier pays the same whether the shift is
+// eight hours or nine.
+export type PayTier = {
+  id: string;
+  name: string;
+  dailyRate: number;
+  sortOrder: number;
+};
+
+// Owner-wide pay rules. Overtime is hourly and the same for every tier.
+export type PaySettings = {
+  overtimeHourlyRate: number;
+};
+
+// One employee's day at the clock. `timeIn` and `timeOut` are what the server
+// recorded; `approvedIn` and `approvedOut` are the owner's corrections, so the
+// times that count are the approved ones where they exist.
+//
+// The three rate fields are the rules this shift is paid by: the frozen
+// snapshot once it is approved, today's settings before that. `dailyRate` is
+// null for an employee who has no tier yet, which is what blocks approval.
+export type Shift = {
+  id: string;
+  profileId: string;
+  employeeName: string;
+  branchId: string;
+  workDate: string;
+  timeIn: string;
+  timeOut: string | null;
+  approvedIn: string | null;
+  approvedOut: string | null;
+  status: ShiftStatus;
+  photoInUrl: string | null;
+  photoOutUrl: string | null;
+  note: string | null;
+  dailyRate: number | null;
+  overtimeRate: number;
+  standardMinutes: number;
+};
+
+// A stored shift as it comes off either backend, before names, pay rules, and
+// signed photo URLs are attached to make a `Shift`.
+export type ShiftRecord = {
+  id: string;
+  profileId: string;
+  branchId: string;
+  workDate: string;
+  timeIn: string;
+  timeOut: string | null;
+  photoInPath: string | null;
+  photoOutPath: string | null;
+  status: ShiftStatus;
+  approvedIn: string | null;
+  approvedOut: string | null;
+  dailyRateSnapshot: number | null;
+  overtimeRateSnapshot: number | null;
+  standardMinutesSnapshot: number | null;
+  note: string | null;
+};
+
+export type BranchEmployee = {
+  id: string;
+  fullName: string;
+  role: Role;
+  payTierId: string | null;
+};
+
+// What one approved shift is worth, split so the owner can see where the money
+// went. `regularPay` is prorated: a short shift earns a fraction of the day.
+export type ShiftPay = {
+  workedMinutes: number;
+  regularMinutes: number;
+  overtimeMinutes: number;
+  regularPay: number;
+  overtimePay: number;
+  total: number;
+};
+
+export type PayrollRow = {
+  profileId: string;
+  employeeName: string;
+  tierName: string | null;
+  shiftCount: number;
+  workedMinutes: number;
+  overtimeMinutes: number;
+  regularPay: number;
+  overtimePay: number;
+  total: number;
+};
+
+// `pendingShiftCount` is the hours still waiting on the owner, which is money
+// this report is deliberately not counting yet.
+export type PayrollReport = {
+  rows: PayrollRow[];
+  total: number;
+  pendingShiftCount: number;
+};
+
+export type PeriodKind = "day" | "week" | "month";
+
+export type Period = {
+  kind: PeriodKind;
+  anchor: string;
+  start: string;
+  end: string;
+  label: string;
 };
 
 export function canEnterBranch(user: SessionUser, branchId: string) {
@@ -210,5 +325,15 @@ export function canManageStaff(user: SessionUser) {
 }
 
 export function canSeeSuperadminExpenses(user: SessionUser) {
+  return user.role === "superadmin";
+}
+
+// The owner has no branch and works no shift, so the clock is for everyone
+// else: each admin and user account is one person.
+export function canClock(user: SessionUser) {
+  return user.role !== "superadmin" && user.branchId !== null;
+}
+
+export function canManagePayroll(user: SessionUser) {
   return user.role === "superadmin";
 }

@@ -1,18 +1,23 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { manilaToday } from "@/lib/dates";
+import { manilaDateKey, manilaToday } from "@/lib/dates";
 import type {
   Branch,
   BranchCashPosition,
+  BranchEmployee,
   Business,
   CashDeposit,
   CashLedgerRow,
   DayRecordStatus,
   ExpenseCategory,
   MonthReport,
+  PaySettings,
+  PayTier,
   Product,
   Role,
   SessionUser,
+  ShiftRecord,
+  ShiftStatus,
   StaffMember,
   StockItem,
 } from "@/lib/types";
@@ -26,6 +31,7 @@ type DemoUser = {
   fullName: string;
   role: Role;
   branchId: string | null;
+  payTierId: string | null;
 };
 
 type DemoStore = {
@@ -71,9 +77,13 @@ type DemoStore = {
     recordedByName: string;
     updatedByName: string;
   }[];
+  payTiers: PayTier[];
+  paySettings: PaySettings;
+  shifts: ShiftRecord[];
 };
 
 const DATA_PATH = path.join(process.cwd(), "data", "demo-store.json");
+const PHOTO_DIR = path.join(process.cwd(), "data", "attendance");
 
 const seed: DemoStore = {
   users: [
@@ -84,6 +94,7 @@ const seed: DemoStore = {
       fullName: "Super Admin",
       role: "superadmin",
       branchId: null,
+      payTierId: null,
     },
     {
       id: "user-admin",
@@ -92,6 +103,7 @@ const seed: DemoStore = {
       fullName: "Don Mac Admin",
       role: "admin",
       branchId: "br-don-mac-main",
+      payTierId: "tier-senior",
     },
     {
       id: "user-staff",
@@ -100,6 +112,7 @@ const seed: DemoStore = {
       fullName: "Don Mac Staff",
       role: "user",
       branchId: "br-don-mac-main",
+      payTierId: "tier-standard",
     },
   ],
   businesses: [
@@ -113,24 +126,35 @@ const seed: DemoStore = {
       businessId: "biz-don-mac",
       name: "Main",
       businessName: "Don Macchiatos",
+      standardShiftHours: 8,
     },
     {
       id: "br-don-mac-sm",
       businessId: "biz-don-mac",
       name: "SM City",
       businessName: "Don Macchiatos",
+      standardShiftHours: 8,
+    },
+    {
+      id: "br-don-mac-catarman",
+      businessId: "biz-don-mac",
+      name: "Catarman",
+      businessName: "Don Macchiatos",
+      standardShiftHours: 9,
     },
     {
       id: "br-don-lemon-main",
       businessId: "biz-don-lemon",
       name: "Main",
       businessName: "Don Lemon",
+      standardShiftHours: 8,
     },
     {
       id: "br-yogurt-main",
       businessId: "biz-yogurt",
       name: "Main",
       businessName: "Yogurt",
+      standardShiftHours: 8,
     },
   ],
   products: [
@@ -262,6 +286,12 @@ const seed: DemoStore = {
   ],
   stockEntries: [],
   cashDeposits: [],
+  payTiers: [
+    { id: "tier-standard", name: "Standard", dailyRate: 400, sortOrder: 1 },
+    { id: "tier-senior", name: "Senior", dailyRate: 450, sortOrder: 2 },
+  ],
+  paySettings: { overtimeHourlyRate: 50 },
+  shifts: [],
 };
 
 function withSampleRecords(store: DemoStore): DemoStore {
@@ -346,6 +376,45 @@ function withSampleRecords(store: DemoStore): DemoStore {
       updatedByName: "",
     },
   ];
+  // One shift waiting on the owner and one already signed off, so both halves
+  // of the hours page have something in them on a fresh store. No photos: a
+  // seeded shift has no file behind it, which the review cards allow for.
+  store.shifts = [
+    {
+      id: "sh1",
+      profileId: "user-staff",
+      branchId: "br-don-mac-main",
+      workDate: y,
+      timeIn: `${y}T08:03:00+08:00`,
+      timeOut: `${y}T17:12:00+08:00`,
+      photoInPath: null,
+      photoOutPath: null,
+      status: "pending",
+      approvedIn: null,
+      approvedOut: null,
+      dailyRateSnapshot: null,
+      overtimeRateSnapshot: null,
+      standardMinutesSnapshot: null,
+      note: null,
+    },
+    {
+      id: "sh2",
+      profileId: "user-admin",
+      branchId: "br-don-mac-main",
+      workDate: y,
+      timeIn: `${y}T09:00:00+08:00`,
+      timeOut: `${y}T17:30:00+08:00`,
+      photoInPath: null,
+      photoOutPath: null,
+      status: "approved",
+      approvedIn: null,
+      approvedOut: null,
+      dailyRateSnapshot: 450,
+      overtimeRateSnapshot: 50,
+      standardMinutesSnapshot: 480,
+      note: null,
+    },
+  ];
   return store;
 }
 
@@ -421,6 +490,17 @@ async function loadStore(): Promise<DemoStore> {
     parsed.stockEntries ??= [];
     // A store written before the deposit log existed is missing this one.
     parsed.cashDeposits ??= [];
+    // A store written before the time clock existed has no pay rules, no
+    // shifts, and no shift length on its branches.
+    parsed.payTiers ??= structuredClone(seed.payTiers);
+    parsed.paySettings ??= structuredClone(seed.paySettings);
+    parsed.shifts ??= [];
+    for (const branch of parsed.branches) {
+      branch.standardShiftHours ??= /catarman/i.test(branch.name) ? 9 : 8;
+    }
+    for (const user of parsed.users) {
+      user.payTierId ??= null;
+    }
     backfillSuperadminExpenses(parsed);
     backfillSalesPaymentSplit(parsed);
     backfillExpensePaymentSplit(parsed);
@@ -1007,6 +1087,7 @@ export async function demoListStaff(): Promise<StaffMember[]> {
       branchId: user.branchId,
       branchName: branch?.name ?? null,
       businessName: branch?.businessName ?? null,
+      payTierId: user.payTierId,
     };
   });
 }
@@ -1017,6 +1098,7 @@ export async function demoCreateStaff(input: {
   fullName: string;
   role: Role;
   branchId: string | null;
+  payTierId: string | null;
 }) {
   const store = await loadStore();
   if (store.users.some((item) => item.email.toLowerCase() === input.email.toLowerCase())) {
@@ -1029,6 +1111,191 @@ export async function demoCreateStaff(input: {
     fullName: input.fullName,
     role: input.role,
     branchId: input.role === "superadmin" ? null : input.branchId,
+    payTierId: input.role === "superadmin" ? null : input.payTierId,
   });
   await persist(store);
+}
+
+export async function demoListPayTiers(): Promise<PayTier[]> {
+  const store = await loadStore();
+  return [...store.payTiers].sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export async function demoUpdatePayTier(input: {
+  id: string;
+  name: string;
+  dailyRate: number;
+}) {
+  const store = await loadStore();
+  const tier = store.payTiers.find((item) => item.id === input.id);
+  if (!tier) throw new Error("Pay rate not found.");
+  tier.name = input.name;
+  tier.dailyRate = input.dailyRate;
+  await persist(store);
+}
+
+export async function demoGetPaySettings(): Promise<PaySettings> {
+  const store = await loadStore();
+  return { ...store.paySettings };
+}
+
+export async function demoSetPaySettings(overtimeHourlyRate: number) {
+  const store = await loadStore();
+  store.paySettings.overtimeHourlyRate = overtimeHourlyRate;
+  await persist(store);
+}
+
+export async function demoSetBranchShiftHours(branchId: string, hours: number) {
+  const store = await loadStore();
+  const branch = store.branches.find((item) => item.id === branchId);
+  if (!branch) throw new Error("Branch not found.");
+  branch.standardShiftHours = hours;
+  await persist(store);
+}
+
+export async function demoSetEmployeeTier(
+  profileId: string,
+  payTierId: string | null,
+) {
+  const store = await loadStore();
+  const user = store.users.find((item) => item.id === profileId);
+  if (!user) throw new Error("Employee not found.");
+  user.payTierId = payTierId;
+  await persist(store);
+}
+
+export async function demoListBranchEmployees(
+  branchId: string,
+): Promise<BranchEmployee[]> {
+  const store = await loadStore();
+  return store.users
+    .filter((user) => user.branchId === branchId)
+    .sort((a, b) => a.fullName.localeCompare(b.fullName))
+    .map((user) => ({
+      id: user.id,
+      fullName: user.fullName,
+      role: user.role,
+      payTierId: user.payTierId,
+    }));
+}
+
+export async function demoListShifts(filter: {
+  branchId?: string;
+  profileId?: string;
+  start?: string;
+  end?: string;
+}): Promise<ShiftRecord[]> {
+  const store = await loadStore();
+  return store.shifts
+    .filter((shift) => {
+      if (filter.branchId && shift.branchId !== filter.branchId) return false;
+      if (filter.profileId && shift.profileId !== filter.profileId) return false;
+      if (filter.start && shift.workDate < filter.start) return false;
+      if (filter.end && shift.workDate > filter.end) return false;
+      return true;
+    })
+    .sort((a, b) => (a.workDate === b.workDate ? 0 : a.workDate < b.workDate ? 1 : -1))
+    .map((shift) => ({ ...shift }));
+}
+
+export async function demoPendingShiftBranches() {
+  const store = await loadStore();
+  return store.shifts
+    .filter((shift) => shift.status === "open" || shift.status === "pending")
+    .map((shift) => shift.branchId);
+}
+
+// Mirrors public.clock_in: the branch comes from the account and the time from
+// the clock on this machine, never from the request.
+export async function demoClockIn(profileId: string, photoPath: string) {
+  const store = await loadStore();
+  const user = store.users.find((item) => item.id === profileId);
+  if (!user || !user.branchId || user.role === "superadmin") {
+    throw new Error("This account does not time in.");
+  }
+  const now = new Date().toISOString();
+  const workDate = manilaDateKey(now);
+  if (store.shifts.some((shift) => shift.profileId === profileId && shift.status === "open")) {
+    throw new Error("You are already timed in.");
+  }
+  if (
+    store.shifts.some(
+      (shift) => shift.profileId === profileId && shift.workDate === workDate,
+    )
+  ) {
+    throw new Error("Today is already recorded.");
+  }
+  store.shifts.push({
+    id: crypto.randomUUID(),
+    profileId,
+    branchId: user.branchId,
+    workDate,
+    timeIn: now,
+    timeOut: null,
+    photoInPath: photoPath,
+    photoOutPath: null,
+    status: "open",
+    approvedIn: null,
+    approvedOut: null,
+    dailyRateSnapshot: null,
+    overtimeRateSnapshot: null,
+    standardMinutesSnapshot: null,
+    note: null,
+  });
+  await persist(store);
+}
+
+export async function demoClockOut(profileId: string, photoPath: string) {
+  const store = await loadStore();
+  const shift = store.shifts.find(
+    (item) => item.profileId === profileId && item.status === "open",
+  );
+  if (!shift) throw new Error("You are not timed in.");
+  shift.timeOut = new Date().toISOString();
+  shift.photoOutPath = photoPath;
+  shift.status = "pending";
+  await persist(store);
+}
+
+export async function demoReviewShift(
+  shiftId: string,
+  branchId: string,
+  input: {
+    status: ShiftStatus;
+    approvedIn: string | null;
+    approvedOut: string | null;
+    dailyRateSnapshot: number | null;
+    overtimeRateSnapshot: number | null;
+    standardMinutesSnapshot: number | null;
+    note: string | null;
+  },
+) {
+  const store = await loadStore();
+  const shift = store.shifts.find(
+    (item) => item.id === shiftId && item.branchId === branchId,
+  );
+  if (!shift) throw new Error("Shift not found.");
+  Object.assign(shift, input);
+  await persist(store);
+}
+
+// Demo mode has no object storage, so a captured photo goes to disk beside the
+// JSON store and is read back by the superadmin-only photo route.
+export async function demoSavePhoto(name: string, bytes: ArrayBuffer) {
+  const file = name.replace(/[^a-zA-Z0-9.-]/g, "_");
+  await mkdir(PHOTO_DIR, { recursive: true });
+  await writeFile(path.join(PHOTO_DIR, file), Buffer.from(bytes));
+  return file;
+}
+
+export async function demoReadPhoto(shiftId: string, kind: "in" | "out") {
+  const store = await loadStore();
+  const shift = store.shifts.find((item) => item.id === shiftId);
+  const file = kind === "in" ? shift?.photoInPath : shift?.photoOutPath;
+  if (!file) return null;
+  try {
+    return await readFile(path.join(PHOTO_DIR, path.basename(file)));
+  } catch {
+    return null;
+  }
 }

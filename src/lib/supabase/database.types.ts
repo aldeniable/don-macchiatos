@@ -1,5 +1,7 @@
 export type UserRole = "superadmin" | "admin" | "user";
 
+export type ShiftStatus = "open" | "pending" | "approved" | "rejected";
+
 type Row = {
   businesses: {
     id: string;
@@ -11,6 +13,7 @@ type Row = {
     id: string;
     business_id: string;
     name: string;
+    standard_shift_hours: number;
     created_at: string;
   };
   profiles: {
@@ -18,6 +21,7 @@ type Row = {
     role: UserRole;
     branch_id: string | null;
     full_name: string;
+    pay_tier_id: string | null;
     created_at: string;
   };
   products: {
@@ -100,6 +104,39 @@ type Row = {
     recorded_by: string | null;
     updated_at: string;
   };
+  pay_tiers: {
+    id: string;
+    name: string;
+    daily_rate: number;
+    sort_order: number;
+    created_at: string;
+  };
+  pay_settings: {
+    id: boolean;
+    overtime_hourly_rate: number;
+    updated_at: string;
+  };
+  shifts: {
+    id: string;
+    profile_id: string;
+    branch_id: string;
+    work_date: string;
+    time_in: string;
+    time_out: string | null;
+    photo_in_path: string | null;
+    photo_out_path: string | null;
+    status: ShiftStatus;
+    approved_in: string | null;
+    approved_out: string | null;
+    daily_rate_snapshot: number | null;
+    overtime_rate_snapshot: number | null;
+    standard_minutes_snapshot: number | null;
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+    note: string | null;
+    created_at: string;
+    updated_at: string;
+  };
 };
 
 type Relationships = {
@@ -119,6 +156,13 @@ type Relationships = {
       columns: ["branch_id"];
       isOneToOne: false;
       referencedRelation: "branches";
+      referencedColumns: ["id"];
+    },
+    {
+      foreignKeyName: "profiles_pay_tier_id_fkey";
+      columns: ["pay_tier_id"];
+      isOneToOne: false;
+      referencedRelation: "pay_tiers";
       referencedColumns: ["id"];
     },
   ];
@@ -169,6 +213,17 @@ type Relationships = {
     },
   ];
   stock_entries: [];
+  pay_tiers: [];
+  pay_settings: [];
+  shifts: [
+    {
+      foreignKeyName: "shifts_profile_id_fkey";
+      columns: ["profile_id"];
+      isOneToOne: false;
+      referencedRelation: "profiles";
+      referencedColumns: ["id"];
+    },
+  ];
 };
 
 export type Database = {
@@ -225,9 +280,12 @@ export type Database = {
           last_deposit_amount: number | null;
         }[];
       };
+      clock_in: { Args: { p_photo_path: string }; Returns: string };
+      clock_out: { Args: { p_photo_path: string }; Returns: string };
     };
     Enums: {
       user_role: UserRole;
+      shift_status: ShiftStatus;
     };
     CompositeTypes: Record<string, never>;
   };

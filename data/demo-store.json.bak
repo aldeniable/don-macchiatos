@@ -1,0 +1,388 @@
+{
+  "users": [
+    {
+      "id": "user-super",
+      "email": "superadmin@demo.local",
+      "password": "demo",
+      "fullName": "Super Admin",
+      "role": "superadmin",
+      "branchId": null
+    },
+    {
+      "id": "user-admin",
+      "email": "admin@demo.local",
+      "password": "demo",
+      "fullName": "Don Mac Admin",
+      "role": "admin",
+      "branchId": "br-don-mac-main"
+    },
+    {
+      "id": "user-staff",
+      "email": "user@demo.local",
+      "password": "demo",
+      "fullName": "Don Mac Staff",
+      "role": "user",
+      "branchId": "br-don-mac-main"
+    }
+  ],
+  "businesses": [
+    {
+      "id": "biz-don-mac",
+      "slug": "don-macchiatos",
+      "name": "Don Macchiatos"
+    },
+    {
+      "id": "biz-don-lemon",
+      "slug": "don-lemon",
+      "name": "Don Lemon"
+    },
+    {
+      "id": "biz-yogurt",
+      "slug": "yogurt",
+      "name": "Yogurt"
+    }
+  ],
+  "branches": [
+    {
+      "id": "br-don-mac-main",
+      "businessId": "biz-don-mac",
+      "name": "Main",
+      "businessName": "Don Macchiatos"
+    },
+    {
+      "id": "br-don-mac-sm",
+      "businessId": "biz-don-mac",
+      "name": "SM City",
+      "businessName": "Don Macchiatos"
+    },
+    {
+      "id": "br-don-lemon-main",
+      "businessId": "biz-don-lemon",
+      "name": "Main",
+      "businessName": "Don Lemon"
+    },
+    {
+      "id": "br-yogurt-main",
+      "businessId": "biz-yogurt",
+      "name": "Main",
+      "businessName": "Yogurt"
+    }
+  ],
+  "products": [
+    {
+      "id": "p-spanish",
+      "businessId": "biz-don-mac",
+      "name": "Spanish Latte",
+      "isActive": true,
+      "sortOrder": 1,
+      "price": null
+    },
+    {
+      "id": "p-caramel",
+      "businessId": "biz-don-mac",
+      "name": "Caramel Macchiato",
+      "isActive": true,
+      "sortOrder": 2,
+      "price": null
+    },
+    {
+      "id": "p-americano",
+      "businessId": "biz-don-mac",
+      "name": "Americano",
+      "isActive": true,
+      "sortOrder": 3,
+      "price": null
+    },
+    {
+      "id": "p-croissant",
+      "businessId": "biz-don-mac",
+      "name": "Croissant",
+      "isActive": true,
+      "sortOrder": 4,
+      "price": null
+    },
+    {
+      "id": "p-lemonade",
+      "businessId": "biz-don-lemon",
+      "name": "Classic Lemonade",
+      "isActive": true,
+      "sortOrder": 1,
+      "price": null
+    },
+    {
+      "id": "p-yakult",
+      "businessId": "biz-don-lemon",
+      "name": "Yakult Lemon",
+      "isActive": true,
+      "sortOrder": 2,
+      "price": null
+    },
+    {
+      "id": "p-honey",
+      "businessId": "biz-don-lemon",
+      "name": "Honey Lemon",
+      "isActive": true,
+      "sortOrder": 3,
+      "price": null
+    },
+    {
+      "id": "p-classic-yo",
+      "businessId": "biz-yogurt",
+      "name": "Classic Yogurt",
+      "isActive": true,
+      "sortOrder": 1,
+      "price": null
+    },
+    {
+      "id": "p-mango-yo",
+      "businessId": "biz-yogurt",
+      "name": "Mango Yogurt",
+      "isActive": true,
+      "sortOrder": 2,
+      "price": null
+    },
+    {
+      "id": "p-straw-yo",
+      "businessId": "biz-yogurt",
+      "name": "Strawberry Yogurt",
+      "isActive": true,
+      "sortOrder": 3,
+      "price": null
+    },
+    {
+      "id": "878e8105-6f4b-40ca-8f9c-313807aebba5",
+      "businessId": "biz-don-mac",
+      "name": "Iced Mocha",
+      "isActive": true,
+      "sortOrder": 5,
+      "price": null
+    }
+  ],
+  "prices": [
+    {
+      "branchId": "br-don-mac-main",
+      "productId": "p-spanish",
+      "price": 120
+    },
+    {
+      "branchId": "br-don-mac-main",
+      "productId": "p-caramel",
+      "price": 135
+    },
+    {
+      "branchId": "br-don-mac-main",
+      "productId": "p-americano",
+      "price": 90
+    },
+    {
+      "branchId": "br-don-mac-main",
+      "productId": "p-croissant",
+      "price": 75
+    },
+    {
+      "branchId": "br-don-mac-sm",
+      "productId": "p-spanish",
+      "price": 125
+    },
+    {
+      "branchId": "br-don-mac-sm",
+      "productId": "p-caramel",
+      "price": 140
+    },
+    {
+      "branchId": "br-don-mac-sm",
+      "productId": "p-americano",
+      "price": 95
+    },
+    {
+      "branchId": "br-don-mac-sm",
+      "productId": "p-croissant",
+      "price": 80
+    },
+    {
+      "branchId": "br-don-lemon-main",
+      "productId": "p-lemonade",
+      "price": 80
+    },
+    {
+      "branchId": "br-don-lemon-main",
+      "productId": "p-yakult",
+      "price": 95
+    },
+    {
+      "branchId": "br-don-lemon-main",
+      "productId": "p-honey",
+      "price": 90
+    },
+    {
+      "branchId": "br-yogurt-main",
+      "productId": "p-classic-yo",
+      "price": 85
+    },
+    {
+      "branchId": "br-yogurt-main",
+      "productId": "p-mango-yo",
+      "price": 95
+    },
+    {
+      "branchId": "br-yogurt-main",
+      "productId": "p-straw-yo",
+      "price": 95
+    },
+    {
+      "branchId": "br-don-mac-main",
+      "productId": "878e8105-6f4b-40ca-8f9c-313807aebba5",
+      "price": 130
+    }
+  ],
+  "expenseCategories": [
+    {
+      "id": "e-ice",
+      "businessId": "biz-don-mac",
+      "name": "Ice",
+      "isActive": true,
+      "sortOrder": 1
+    },
+    {
+      "id": "e-cups",
+      "businessId": "biz-don-mac",
+      "name": "Cups",
+      "isActive": true,
+      "sortOrder": 2
+    },
+    {
+      "id": "e-milk",
+      "businessId": "biz-don-mac",
+      "name": "Milk",
+      "isActive": true,
+      "sortOrder": 3
+    },
+    {
+      "id": "e-rent",
+      "businessId": "biz-don-mac",
+      "name": "Rent",
+      "isActive": true,
+      "sortOrder": 4
+    },
+    {
+      "id": "e-util",
+      "businessId": "biz-don-mac",
+      "name": "Utilities",
+      "isActive": true,
+      "sortOrder": 5
+    },
+    {
+      "id": "e-other",
+      "businessId": "biz-don-mac",
+      "name": "Others",
+      "isActive": true,
+      "sortOrder": 6
+    },
+    {
+      "id": "el-ice",
+      "businessId": "biz-don-lemon",
+      "name": "Ice",
+      "isActive": true,
+      "sortOrder": 1
+    },
+    {
+      "id": "el-cups",
+      "businessId": "biz-don-lemon",
+      "name": "Cups",
+      "isActive": true,
+      "sortOrder": 2
+    },
+    {
+      "id": "el-lemons",
+      "businessId": "biz-don-lemon",
+      "name": "Lemons",
+      "isActive": true,
+      "sortOrder": 3
+    },
+    {
+      "id": "el-rent",
+      "businessId": "biz-don-lemon",
+      "name": "Rent",
+      "isActive": true,
+      "sortOrder": 4
+    },
+    {
+      "id": "ey-cups",
+      "businessId": "biz-yogurt",
+      "name": "Cups",
+      "isActive": true,
+      "sortOrder": 1
+    },
+    {
+      "id": "ey-fruit",
+      "businessId": "biz-yogurt",
+      "name": "Fruit",
+      "isActive": true,
+      "sortOrder": 2
+    },
+    {
+      "id": "ey-rent",
+      "businessId": "biz-yogurt",
+      "name": "Rent",
+      "isActive": true,
+      "sortOrder": 3
+    }
+  ],
+  "sales": [
+    {
+      "id": "s1",
+      "branchId": "br-don-mac-main",
+      "productId": "p-spanish",
+      "date": "2026-09-17",
+      "quantity": 18,
+      "unitPriceSnapshot": 120
+    },
+    {
+      "id": "s2",
+      "branchId": "br-don-mac-main",
+      "productId": "p-caramel",
+      "date": "2026-09-17",
+      "quantity": 11,
+      "unitPriceSnapshot": 135
+    },
+    {
+      "id": "fc97677f-8985-4a24-a9f8-be27074ede66",
+      "branchId": "br-don-mac-main",
+      "productId": "p-spanish",
+      "date": "2026-09-18",
+      "quantity": 1,
+      "unitPriceSnapshot": 120
+    },
+    {
+      "id": "23aec1ee-b05d-4f1e-bce5-194aa8346d60",
+      "branchId": "br-don-mac-main",
+      "productId": "p-spanish",
+      "date": "2026-09-16",
+      "quantity": 1,
+      "unitPriceSnapshot": 120
+    }
+  ],
+  "expenses": [
+    {
+      "id": "x1",
+      "branchId": "br-don-mac-main",
+      "categoryId": "e-ice",
+      "date": "2026-09-17",
+      "amount": 250
+    },
+    {
+      "id": "x2",
+      "branchId": "br-don-mac-main",
+      "categoryId": "e-cups",
+      "date": "2026-09-17",
+      "amount": 180
+    },
+    {
+      "id": "4b909949-6de9-47bb-bcd3-421462482693",
+      "branchId": "br-don-mac-main",
+      "categoryId": "e-ice",
+      "date": "2026-09-18",
+      "amount": 150
+    }
+  ]
+}
