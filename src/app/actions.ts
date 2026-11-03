@@ -22,6 +22,7 @@ import {
   setBranchShiftHours,
   setEmployeeTier,
   setPaySettings,
+  setStaffBranches,
   signIn,
   signOut,
   updatePayTier,
@@ -238,8 +239,10 @@ function readPhoto(formData: FormData) {
 }
 
 export async function clockInAction(formData: FormData) {
-  await clockIn(readPhoto(formData));
-  revalidateClock(String(formData.get("branchId") ?? ""));
+  const branchId = String(formData.get("branchId") ?? "");
+  if (!branchId) throw new Error("Branch not found.");
+  await clockIn(readPhoto(formData), branchId);
+  revalidateClock(branchId);
 }
 
 export async function clockOutAction(formData: FormData) {
@@ -338,12 +341,14 @@ export async function saveShiftHoursAction(formData: FormData) {
   revalidateConfigure(branchId);
 }
 
+// A rate can be set from a branch's Configure page or from Staff, where the
+// employee may belong to several branches and none is in the form.
 export async function saveEmployeeTierAction(formData: FormData) {
   const branchId = String(formData.get("branchId") ?? "");
   const profileId = String(formData.get("profileId") ?? "");
   if (!profileId) throw new Error("Employee not found.");
   await setEmployeeTier(profileId, String(formData.get("payTierId") ?? "") || null);
-  revalidateConfigure(branchId);
+  if (branchId) revalidateConfigure(branchId);
   revalidatePath("/staff");
 }
 
@@ -360,9 +365,23 @@ export async function createStaffAction(formData: FormData) {
     password: String(formData.get("password") ?? ""),
     fullName: String(formData.get("fullName") ?? "").trim(),
     role,
-    branchId: role === "superadmin" ? null : String(formData.get("branchId") ?? "") || null,
+    branchIds:
+      role === "superadmin"
+        ? []
+        : formData.getAll("branchIds").map(String).filter(Boolean),
     payTierId:
       role === "superadmin" ? null : String(formData.get("payTierId") ?? "") || null,
   });
   revalidatePath("/staff");
+}
+
+export async function saveStaffBranchesAction(formData: FormData) {
+  const profileId = String(formData.get("profileId") ?? "");
+  if (!profileId) throw new Error("Employee not found.");
+  await setStaffBranches(
+    profileId,
+    formData.getAll("branchIds").map(String).filter(Boolean),
+  );
+  revalidatePath("/staff");
+  revalidatePath("/select");
 }

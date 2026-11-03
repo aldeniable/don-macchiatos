@@ -12,10 +12,11 @@ import {
   LogOut,
   Package,
   Receipt,
+  Store,
   Users,
 } from "lucide-react";
 import { logoutAction } from "@/app/actions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type { Branch, SessionUser } from "@/lib/types";
 import { canAdminBranch, canManageStaff } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,9 @@ export function AppShell({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const admin = branch ? canAdminBranch(user, branch.id) : false;
+  // Only offered to someone who has somewhere else to go.
+  const canSwitchStore =
+    Boolean(branch) && (user.role === "superadmin" || user.branchIds.length > 1);
   const links = branch
     ? [
         { href: `/b/${branch.id}`, label: "Calendar", icon: CalendarDays },
@@ -84,11 +88,22 @@ export function AppShell({
             {branch ? `${branch.name} · ${user.fullName || user.email}` : user.fullName || user.email}
           </p>
         </div>
-        <form action={logoutAction}>
-          <Button type="submit" variant="ghost" size="icon-lg" aria-label="Sign out">
-            <LogOut />
-          </Button>
-        </form>
+        <div className="flex items-center">
+          {canSwitchStore ? (
+            <Link
+              href="/select"
+              aria-label="Switch store"
+              className={buttonVariants({ variant: "ghost", size: "icon-lg" })}
+            >
+              <Store className="size-4" />
+            </Link>
+          ) : null}
+          <form action={logoutAction}>
+            <Button type="submit" variant="ghost" size="icon-lg" aria-label="Sign out">
+              <LogOut />
+            </Button>
+          </form>
+        </div>
       </header>
       <main className="flex-1 px-4 py-4 pb-28">{children}</main>
       {links.length > 0 ? (

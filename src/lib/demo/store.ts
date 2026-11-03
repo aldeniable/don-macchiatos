@@ -30,7 +30,7 @@ type DemoUser = {
   password: string;
   fullName: string;
   role: Role;
-  branchId: string | null;
+  branchIds: string[];
   payTierId: string | null;
 };
 
@@ -93,7 +93,7 @@ const seed: DemoStore = {
       password: "demo",
       fullName: "Super Admin",
       role: "superadmin",
-      branchId: null,
+      branchIds: [],
       payTierId: null,
     },
     {
@@ -102,16 +102,18 @@ const seed: DemoStore = {
       password: "demo",
       fullName: "Don Mac Admin",
       role: "admin",
-      branchId: "br-don-mac-main",
+      branchIds: ["br-don-mac-main"],
       payTierId: "tier-senior",
     },
+    // Works the coffee and the lemonade counter at the same site, so signing in
+    // as this account lands on the store picker.
     {
       id: "user-staff",
       email: "user@demo.local",
       password: "demo",
       fullName: "Don Mac Staff",
       role: "user",
-      branchId: "br-don-mac-main",
+      branchIds: ["br-don-mac-main", "br-don-lemon-main"],
       payTierId: "tier-standard",
     },
   ],
@@ -500,6 +502,11 @@ async function loadStore(): Promise<DemoStore> {
     }
     for (const user of parsed.users) {
       user.payTierId ??= null;
+      // A store written before an account could reach several stores holds a
+      // single branchId instead of a list.
+      const legacy = (user as DemoUser & { branchId?: string | null }).branchId;
+      user.branchIds ??= legacy ? [legacy] : [];
+      delete (user as DemoUser & { branchId?: string | null }).branchId;
     }
     backfillSuperadminExpenses(parsed);
     backfillSalesPaymentSplit(parsed);
@@ -532,7 +539,7 @@ function toSession(user: DemoUser): SessionUser {
     email: user.email,
     fullName: user.fullName,
     role: user.role,
-    branchId: user.branchId,
+    branchIds: [...user.branchIds],
   };
 }
 
@@ -557,18 +564,20 @@ export async function demoGetUser(userId: string | undefined) {
 export async function demoListBusinesses(user: SessionUser) {
   const store = await loadStore();
   if (user.role === "superadmin") return store.businesses;
-  const branch = store.branches.find((item) => item.id === user.branchId);
-  return store.businesses.filter((item) => item.id === branch?.businessId);
+  const businessIds = new Set(
+    store.branches
+      .filter((branch) => user.branchIds.includes(branch.id))
+      .map((branch) => branch.businessId),
+  );
+  return store.businesses.filter((item) => businessIds.has(item.id));
 }
 
 export async function demoListBranches(user: SessionUser, businessId?: string) {
   const store = await loadStore();
-  if (user.role === "superadmin") {
-    return store.branches.filter(
-      (item) => !businessId || item.businessId === businessId,
-    );
-  }
-  return store.branches.filter((item) => item.id === user.branchId);
+  return store.branches.filter((item) => {
+    if (businessId && item.businessId !== businessId) return false;
+    return user.role === "superadmin" || user.branchIds.includes(item.id);
+  });
 }
 
 export async function demoGetBranch(branchId: string) {
@@ -1049,7 +1058,7 @@ export async function demoCashPositions(
   const store = await loadStore();
   const branches = store.branches.filter((branch) => {
     if (branchId && branch.id !== branchId) return false;
-    return user.role === "superadmin" || branch.id === user.branchId;
+    return user.role === "superadmin" || user.branchIds.includes(branch.id);
   });
 
   return branches.map((branch) => {
@@ -1077,19 +1086,20 @@ export async function demoCashPositions(
 
 export async function demoListStaff(): Promise<StaffMember[]> {
   const store = await loadStore();
-  return store.users.map((user) => {
-    const branch = store.branches.find((item) => item.id === user.branchId);
-    return {
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
-      role: user.role,
-      branchId: user.branchId,
-      branchName: branch?.name ?? null,
-      businessName: branch?.businessName ?? null,
-      payTierId: user.payTierId,
-    };
-  });
+  return store.users.map((user) => ({
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    branches: store.branches
+      .filter((branch) => user.branchIds.includes(branch.id))
+      .map((branch) => ({
+        id: branch.id,
+        name: branch.name,
+        businessName: branch.businessName,
+      })),
+    payTierId: user.payTierId,
+  }));
 }
 
 export async function demoCreateStaff(input: {
@@ -1097,7 +1107,7 @@ export async function demoCreateStaff(input: {
   password: string;
   fullName: string;
   role: Role;
-  branchId: string | null;
+  branchIds: string[];
   payTierId: string | null;
 }) {
   const store = await loadStore();
@@ -1110,9 +1120,17 @@ export async function demoCreateStaff(input: {
     password: input.password,
     fullName: input.fullName,
     role: input.role,
-    branchId: input.role === "superadmin" ? null : input.branchId,
+    branchIds: input.role === "superadmin" ? [] : input.branchIds,
     payTierId: input.role === "superadmin" ? null : input.payTierId,
   });
+  await persist(store);
+}
+
+export async function demoSetStaffBranches(profileId: string, branchIds: string[]) {
+  const store = await loadStore();
+  const user = store.users.find((item) => item.id === profileId);
+  if (!user) throw new Error("Account not found.");
+  user.branchIds = branchIds;
   await persist(store);
 }
 
@@ -1169,7 +1187,7 @@ export async function demoListBranchEmployees(
 ): Promise<BranchEmployee[]> {
   const store = await loadStore();
   return store.users
-    .filter((user) => user.branchId === branchId)
+    .filter((user) => user.branchIds.includes(branchId))
     .sort((a, b) => a.fullName.localeCompare(b.fullName))
     .map((user) => ({
       id: user.id,
@@ -1207,10 +1225,14 @@ export async function demoPendingShiftBranches() {
 
 // Mirrors public.clock_in: the branch comes from the account and the time from
 // the clock on this machine, never from the request.
-export async function demoClockIn(profileId: string, photoPath: string) {
+export async function demoClockIn(
+  profileId: string,
+  branchId: string,
+  photoPath: string,
+) {
   const store = await loadStore();
   const user = store.users.find((item) => item.id === profileId);
-  if (!user || !user.branchId || user.role === "superadmin") {
+  if (!user || user.role === "superadmin" || !user.branchIds.includes(branchId)) {
     throw new Error("This account does not time in.");
   }
   const now = new Date().toISOString();
@@ -1228,7 +1250,7 @@ export async function demoClockIn(profileId: string, photoPath: string) {
   store.shifts.push({
     id: crypto.randomUUID(),
     profileId,
-    branchId: user.branchId,
+    branchId,
     workDate,
     timeIn: now,
     timeOut: null,

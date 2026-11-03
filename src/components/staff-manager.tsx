@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { createStaffAction, saveEmployeeTierAction } from "@/app/actions";
+import {
+  createStaffAction,
+  saveEmployeeTierAction,
+  saveStaffBranchesAction,
+} from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -70,7 +74,10 @@ export function StaffManager({
         </div>
         {role !== "superadmin" ? (
           <>
-            <BranchField branches={branches} />
+            <div className="flex flex-col gap-2">
+              <Label>Stores</Label>
+              <BranchChecklist branches={branches} />
+            </div>
             <PayTierField tiers={tiers} />
           </>
         ) : null}
@@ -85,15 +92,22 @@ export function StaffManager({
               <div>
                 <p className="font-medium">{member.fullName || member.email}</p>
                 <p className="text-xs text-muted-foreground">{member.email}</p>
-                <p className="mt-1 text-sm capitalize">
-                  {member.role}
-                  {member.branchName
-                    ? ` · ${member.businessName} ${member.branchName}`
-                    : ""}
-                </p>
+                <p className="mt-1 text-sm capitalize">{member.role}</p>
+                {member.role !== "superadmin" ? (
+                  <p className="text-xs text-muted-foreground">
+                    {member.branches.length
+                      ? member.branches
+                          .map((branch) => `${branch.businessName} ${branch.name}`)
+                          .join(" · ")
+                      : "No store yet"}
+                  </p>
+                ) : null}
               </div>
               {member.role !== "superadmin" ? (
-                <MemberTier member={member} tiers={tiers} />
+                <>
+                  <MemberBranches member={member} branches={branches} />
+                  <MemberTier member={member} tiers={tiers} />
+                </>
               ) : null}
             </CardContent>
           </Card>
@@ -103,34 +117,96 @@ export function StaffManager({
   );
 }
 
-function BranchField({ branches }: { branches: Branch[] }) {
-  const [branchId, setBranchId] = useState(branches[0]?.id ?? "");
+// One person can work several counters, so stores are ticked rather than
+// picked. Grouped by business, because the same branch name shows up under
+// more than one of them.
+function BranchChecklist({
+  branches,
+  selected,
+  onToggle,
+}: {
+  branches: Branch[];
+  selected?: string[];
+  onToggle?: (branchId: string, checked: boolean) => void;
+}) {
+  const businessNames = [
+    ...new Set(branches.map((branch) => branch.businessName)),
+  ];
   return (
-    <div className="flex flex-col gap-2">
-      <Label>Branch</Label>
-      <Select
-        items={branches.map((branch) => ({
-          value: branch.id,
-          label: `${branch.businessName} · ${branch.name}`,
-        }))}
-        value={branchId}
-        onValueChange={(value) => {
-          if (value) setBranchId(value);
-        }}
-      >
-        <SelectTrigger className="h-11 w-full">
-          <SelectValue placeholder="Select branch" />
-        </SelectTrigger>
-        <SelectContent>
-          {branches.map((branch) => (
-            <SelectItem key={branch.id} value={branch.id}>
-              {branch.businessName} · {branch.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <input type="hidden" name="branchId" value={branchId} />
+    <div className="flex flex-col gap-3 rounded-xl border p-3">
+      {businessNames.map((businessName) => (
+        <div key={businessName} className="flex flex-col gap-1">
+          <p className="text-xs font-medium text-muted-foreground">
+            {businessName}
+          </p>
+          {branches
+            .filter((branch) => branch.businessName === businessName)
+            .map((branch) => (
+              <label
+                key={branch.id}
+                className="flex min-h-11 items-center gap-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  name="branchIds"
+                  value={branch.id}
+                  className="size-5 accent-primary"
+                  {...(selected
+                    ? {
+                        checked: selected.includes(branch.id),
+                        onChange: (event) =>
+                          onToggle?.(branch.id, event.target.checked),
+                      }
+                    : {})}
+                />
+                {branch.name}
+              </label>
+            ))}
+        </div>
+      ))}
     </div>
+  );
+}
+
+// Same Save-once-it-changed rule as the pay rate below, so a list left alone
+// cannot be submitted back over itself.
+function MemberBranches({
+  member,
+  branches,
+}: {
+  member: StaffMember;
+  branches: Branch[];
+}) {
+  const original = member.branches.map((branch) => branch.id);
+  const [selected, setSelected] = useState(original);
+  const unchanged =
+    selected.length === original.length &&
+    original.every((id) => selected.includes(id));
+
+  return (
+    <form action={saveStaffBranchesAction} className="flex flex-col gap-2">
+      <input type="hidden" name="profileId" value={member.id} />
+      <Label className="text-xs text-muted-foreground">Stores</Label>
+      <BranchChecklist
+        branches={branches}
+        selected={selected}
+        onToggle={(branchId, checked) =>
+          setSelected((current) =>
+            checked
+              ? [...current, branchId]
+              : current.filter((id) => id !== branchId),
+          )
+        }
+      />
+      <Button
+        type="submit"
+        variant="outline"
+        className="h-11"
+        disabled={unchanged || selected.length === 0}
+      >
+        Save stores
+      </Button>
+    </form>
   );
 }
 
@@ -178,7 +254,6 @@ function MemberTier({ member, tiers }: { member: StaffMember; tiers: PayTier[] }
 
   return (
     <form action={saveEmployeeTierAction} className="flex items-center gap-2">
-      <input type="hidden" name="branchId" value={member.branchId ?? ""} />
       <input type="hidden" name="profileId" value={member.id} />
       <input type="hidden" name="payTierId" value={payTierId} />
       <Select

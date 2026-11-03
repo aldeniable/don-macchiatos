@@ -19,9 +19,13 @@ type Row = {
   profiles: {
     id: string;
     role: UserRole;
-    branch_id: string | null;
     full_name: string;
     pay_tier_id: string | null;
+    created_at: string;
+  };
+  profile_branches: {
+    profile_id: string;
+    branch_id: string;
     created_at: string;
   };
   products: {
@@ -152,17 +156,26 @@ type Relationships = {
   ];
   profiles: [
     {
-      foreignKeyName: "profiles_branch_id_fkey";
-      columns: ["branch_id"];
-      isOneToOne: false;
-      referencedRelation: "branches";
-      referencedColumns: ["id"];
-    },
-    {
       foreignKeyName: "profiles_pay_tier_id_fkey";
       columns: ["pay_tier_id"];
       isOneToOne: false;
       referencedRelation: "pay_tiers";
+      referencedColumns: ["id"];
+    },
+  ];
+  profile_branches: [
+    {
+      foreignKeyName: "profile_branches_profile_id_fkey";
+      columns: ["profile_id"];
+      isOneToOne: false;
+      referencedRelation: "profiles";
+      referencedColumns: ["id"];
+    },
+    {
+      foreignKeyName: "profile_branches_branch_id_fkey";
+      columns: ["branch_id"];
+      isOneToOne: false;
+      referencedRelation: "branches";
       referencedColumns: ["id"];
     },
   ];
@@ -239,8 +252,8 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       current_role: { Args: Record<string, never>; Returns: UserRole };
-      current_branch_id: { Args: Record<string, never>; Returns: string };
-      current_business_id: { Args: Record<string, never>; Returns: string };
+      can_access_branch: { Args: { p_branch_id: string }; Returns: boolean };
+      can_access_business: { Args: { p_business_id: string }; Returns: boolean };
       expense_category_is_superadmin_only: {
         Args: { p_category_id: string };
         Returns: boolean;
@@ -280,7 +293,10 @@ export type Database = {
           last_deposit_amount: number | null;
         }[];
       };
-      clock_in: { Args: { p_photo_path: string }; Returns: string };
+      clock_in: {
+        Args: { p_photo_path: string; p_branch_id: string };
+        Returns: string;
+      };
       clock_out: { Args: { p_photo_path: string }; Returns: string };
     };
     Enums: {

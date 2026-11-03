@@ -23,7 +23,7 @@ export default async function SelectPage() {
   return (
     <AppShell user={user}>
       <div className="flex flex-col gap-5">
-        <h1 className="text-xl font-semibold">Select branch</h1>
+        <h1 className="text-xl font-semibold">Select store</h1>
         {businesses.map((business) => {
           const businessBranches = branches.filter(
             (branch) => branch.businessId === business.id,

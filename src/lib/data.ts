@@ -37,6 +37,7 @@ import {
   demoSetEmployeeTier,
   demoSetPaySettings,
   demoSetPrice,
+  demoSetStaffBranches,
   demoSignIn,
   demoStockItems,
   demoUpdatePayTier,
@@ -83,6 +84,7 @@ import {
   type Shift,
   type ShiftRecord,
   type ShiftStatus,
+  type StaffMember,
   type StockItem,
   type StockLine,
 } from "@/lib/types";
@@ -99,11 +101,10 @@ export async function getSession(): Promise<SessionUser | null> {
   const email = (data?.claims?.email as string | undefined) ?? "";
   if (!userId) return null;
 
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("role, branch_id, full_name")
-    .eq("id", userId)
-    .maybeSingle();
+  const [{ data: profile, error }, { data: access }] = await Promise.all([
+    supabase.from("profiles").select("role, full_name").eq("id", userId).maybeSingle(),
+    supabase.from("profile_branches").select("branch_id").eq("profile_id", userId),
+  ]);
 
   if (error || !profile) return null;
 
@@ -112,7 +113,7 @@ export async function getSession(): Promise<SessionUser | null> {
     email,
     fullName: profile.full_name,
     role: profile.role,
-    branchId: profile.branch_id,
+    branchIds: (access ?? []).map((row) => row.branch_id),
   };
 }
 
@@ -1046,10 +1047,12 @@ export async function listStaff() {
   if (isDemoMode()) return demoListStaff();
 
   const admin = createAdminClient();
-  const { data: profiles, error } = await admin
-    .from("profiles")
-    .select("id, role, branch_id, full_name, pay_tier_id, branches(name, businesses(name))")
-    .order("full_name");
+  const [{ data: profiles, error }, { data: access }] = await Promise.all([
+    admin.from("profiles").select("id, role, full_name, pay_tier_id").order("full_name"),
+    admin
+      .from("profile_branches")
+      .select("profile_id, branches(id, name, businesses(name))"),
+  ]);
   if (error) throw new Error(error.message);
 
   const { data: authUsers } = await admin.auth.admin.listUsers();
@@ -1057,24 +1060,38 @@ export async function listStaff() {
     (authUsers.users ?? []).map((item) => [item.id, item.email ?? ""]),
   );
 
-  return (profiles ?? []).map((profile) => {
-    const branch = profile.branches as
-      | { name: string; businesses: { name: string } | { name: string }[] | null }
-      | null;
-    const business = branch?.businesses;
-    return {
-      id: profile.id,
-      email: emailMap.get(profile.id) ?? "",
-      fullName: profile.full_name,
-      role: profile.role,
-      branchId: profile.branch_id,
-      branchName: branch?.name ?? null,
+  const branchesByProfile = new Map<string, StaffMember["branches"]>();
+  for (const row of access ?? []) {
+    const branch = row.branches as {
+      id: string;
+      name: string;
+      businesses: { name: string } | { name: string }[] | null;
+    } | null;
+    if (!branch) continue;
+    const business = branch.businesses;
+    const list = branchesByProfile.get(row.profile_id) ?? [];
+    list.push({
+      id: branch.id,
+      name: branch.name,
       businessName: Array.isArray(business)
-        ? (business[0]?.name ?? null)
-        : (business?.name ?? null),
-      payTierId: profile.pay_tier_id,
-    };
-  });
+        ? (business[0]?.name ?? "")
+        : (business?.name ?? ""),
+    });
+    branchesByProfile.set(row.profile_id, list);
+  }
+
+  return (profiles ?? []).map((profile) => ({
+    id: profile.id,
+    email: emailMap.get(profile.id) ?? "",
+    fullName: profile.full_name,
+    role: profile.role,
+    branches: (branchesByProfile.get(profile.id) ?? []).sort((a, b) =>
+      a.businessName === b.businessName
+        ? a.name.localeCompare(b.name)
+        : a.businessName.localeCompare(b.businessName),
+    ),
+    payTierId: profile.pay_tier_id,
+  }));
 }
 
 export async function createStaff(input: {
@@ -1082,16 +1099,19 @@ export async function createStaff(input: {
   password: string;
   fullName: string;
   role: Role;
-  branchId: string | null;
+  branchIds: string[];
   payTierId: string | null;
 }) {
   const user = await requireSession();
   if (!canManageStaff(user)) redirect("/select");
-  if (input.role !== "superadmin" && !input.branchId) {
-    throw new Error("Branch is required for admin and user accounts.");
+  // The owner reaches every store already, so a list on that account would be
+  // a second set of rules saying the same thing.
+  const branchIds = input.role === "superadmin" ? [] : [...new Set(input.branchIds)];
+  if (input.role !== "superadmin" && !branchIds.length) {
+    throw new Error("Pick at least one store for an admin or user account.");
   }
   if (isDemoMode()) {
-    await demoCreateStaff(input);
+    await demoCreateStaff({ ...input, branchIds });
     return;
   }
   const admin = createAdminClient();
@@ -1106,10 +1126,57 @@ export async function createStaff(input: {
     id: data.user.id,
     full_name: input.fullName,
     role: input.role,
-    branch_id: input.role === "superadmin" ? null : input.branchId,
     pay_tier_id: input.role === "superadmin" ? null : input.payTierId,
   });
   if (profileError) throw new Error(profileError.message);
+  if (branchIds.length) {
+    const { error: accessError } = await admin.from("profile_branches").insert(
+      branchIds.map((branchId) => ({
+        profile_id: data.user.id,
+        branch_id: branchId,
+      })),
+    );
+    if (accessError) throw new Error(accessError.message);
+  }
+}
+
+// Replaces one employee's store list outright, so an edit is the full set the
+// owner ticked rather than a diff.
+export async function setStaffBranches(profileId: string, branchIds: string[]) {
+  const user = await requireSession();
+  if (!canManageStaff(user)) redirect("/select");
+  const wanted = [...new Set(branchIds)];
+  if (!wanted.length) {
+    throw new Error("Pick at least one store for an admin or user account.");
+  }
+
+  const staff = await listStaff();
+  const member = staff.find((item) => item.id === profileId);
+  if (!member) throw new Error("Account not found.");
+  if (member.role === "superadmin") {
+    throw new Error("A superadmin already reaches every store.");
+  }
+
+  if (isDemoMode()) {
+    await demoSetStaffBranches(profileId, wanted);
+    return;
+  }
+
+  const admin = createAdminClient();
+  const { error: deleteError } = await admin
+    .from("profile_branches")
+    .delete()
+    .eq("profile_id", profileId)
+    .not("branch_id", "in", `(${wanted.join(",")})`);
+  if (deleteError) throw new Error(deleteError.message);
+
+  const { error: insertError } = await admin
+    .from("profile_branches")
+    .upsert(
+      wanted.map((branchId) => ({ profile_id: profileId, branch_id: branchId })),
+      { onConflict: "profile_id,branch_id" },
+    );
+  if (insertError) throw new Error(insertError.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -1220,19 +1287,33 @@ export async function listBranchEmployees(
   if (!canManagePayroll(user)) redirect("/select");
   if (isDemoMode()) return demoListBranchEmployees(branchId);
 
+  // Someone who works two stores is on both payrolls, under the shifts they
+  // actually clocked at each one.
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("profiles")
-    .select("id, full_name, role, pay_tier_id")
-    .eq("branch_id", branchId)
-    .order("full_name");
+    .from("profile_branches")
+    .select("profiles(id, full_name, role, pay_tier_id)")
+    .eq("branch_id", branchId);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    fullName: row.full_name,
-    role: row.role,
-    payTierId: row.pay_tier_id,
-  }));
+  return (data ?? [])
+    .map((row) => {
+      const profile = row.profiles as {
+        id: string;
+        full_name: string;
+        role: Role;
+        pay_tier_id: string | null;
+      } | null;
+      return profile
+        ? {
+            id: profile.id,
+            fullName: profile.full_name,
+            role: profile.role,
+            payTierId: profile.pay_tier_id,
+          }
+        : null;
+    })
+    .filter((row): row is BranchEmployee => row !== null)
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
 // Shifts the owner has not dealt with yet, per branch, for the badge on the
@@ -1441,7 +1522,7 @@ export async function getBranchPayroll(
 // shift is the owner's view, not theirs.
 export async function listMyShifts(since: string): Promise<Shift[]> {
   const user = await requireSession();
-  if (!canClock(user) || !user.branchId) return [];
+  if (!canClock(user)) return [];
   const records = await listShiftRecords({
     profileId: user.id,
     start: since,
@@ -1482,16 +1563,22 @@ async function uploadShiftPhoto(userId: string, kind: "in" | "out", photo: Blob)
   return name;
 }
 
-export async function clockIn(photo: Blob) {
+export async function clockIn(photo: Blob, branchId: string) {
   const user = await requireSession();
   if (!canClock(user)) throw new Error("This account does not time in.");
+  if (!canEnterBranch(user, branchId)) {
+    throw new Error("This account cannot time in at that store.");
+  }
   const path = await uploadShiftPhoto(user.id, "in", photo);
   if (isDemoMode()) {
-    await demoClockIn(user.id, path);
+    await demoClockIn(user.id, branchId, path);
     return;
   }
   const supabase = await createClient();
-  const { error } = await supabase.rpc("clock_in", { p_photo_path: path });
+  const { error } = await supabase.rpc("clock_in", {
+    p_photo_path: path,
+    p_branch_id: branchId,
+  });
   if (error) throw new Error(error.message);
 }
 
@@ -1670,7 +1757,11 @@ export async function readShiftPhoto(shiftId: string, kind: "in" | "out") {
   return demoReadPhoto(shiftId, kind);
 }
 
+// Somebody who works one store never sees a picker; anyone with a choice to
+// make does.
 export async function homePathFor(user: SessionUser) {
-  if (user.role !== "superadmin" && user.branchId) return `/b/${user.branchId}`;
+  if (user.role !== "superadmin" && user.branchIds.length === 1) {
+    return `/b/${user.branchIds[0]}`;
+  }
   return "/select";
 }

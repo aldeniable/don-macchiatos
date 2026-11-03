@@ -1,11 +1,14 @@
 export type Role = "superadmin" | "admin" | "user";
 
+// `branchIds` is every store this account may enter. One person can work more
+// than one counter, so it is a list even for an admin, and empty only for the
+// owner, who reaches every store anyway.
 export type SessionUser = {
   id: string;
   email: string;
   fullName: string;
   role: Role;
-  branchId: string | null;
+  branchIds: string[];
 };
 
 export type Business = {
@@ -189,9 +192,7 @@ export type StaffMember = {
   email: string;
   fullName: string;
   role: Role;
-  branchId: string | null;
-  branchName: string | null;
-  businessName: string | null;
+  branches: { id: string; name: string; businessName: string }[];
   payTierId: string | null;
 };
 
@@ -308,12 +309,12 @@ export type Period = {
 
 export function canEnterBranch(user: SessionUser, branchId: string) {
   if (user.role === "superadmin") return true;
-  return user.branchId === branchId;
+  return user.branchIds.includes(branchId);
 }
 
 export function canAdminBranch(user: SessionUser, branchId: string) {
   if (user.role === "superadmin") return true;
-  return user.role === "admin" && user.branchId === branchId;
+  return user.role === "admin" && user.branchIds.includes(branchId);
 }
 
 export function canManageCatalog(user: SessionUser) {
@@ -331,7 +332,7 @@ export function canSeeSuperadminExpenses(user: SessionUser) {
 // The owner has no branch and works no shift, so the clock is for everyone
 // else: each admin and user account is one person.
 export function canClock(user: SessionUser) {
-  return user.role !== "superadmin" && user.branchId !== null;
+  return user.role !== "superadmin" && user.branchIds.length > 0;
 }
 
 export function canManagePayroll(user: SessionUser) {
